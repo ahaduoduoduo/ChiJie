@@ -94,6 +94,7 @@ function PageSubscriptions({ state, dispatch }) {
 
 function SubEditor({ sub, dispatch, onClose, toast }) {
   const sourceForm = (pool) => ({
+    name: pool.name || "",
     url: pool.url || "",
     update_interval: pool.update_interval || "1h",
     residential: !!pool.residential,
@@ -141,6 +142,8 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
       </div>
       {tab === "source" && (
         <div className="col gap-12">
+          <div className="field"><label className="field-label">Display name</label>
+            <input className="input mono" value={source.name} onChange={e => setSourceField("name", e.target.value)} placeholder="airport-a"/></div>
           <div className="field"><label className="field-label">Subscription URL(s)</label>
             <textarea className="input mono" value={source.url} onChange={e => setSourceField("url", e.target.value)} style={{minHeight:120}} spellCheck="false"></textarea>
             <div className="field-hint">Multiple URLs separated by newline, comma or |.</div></div>
@@ -152,12 +155,14 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
           </div>
           <div className="row gap-12" style={{marginTop:4, flexWrap:"wrap"}}>
             <button className="btn primary" onClick={async () => {
+              const nextName = source.name.trim();
+              if (!nextName) { toast("Display name is required"); return; }
               if (!source.url.trim()) { toast("Subscription URL is required"); return; }
               const ok = await dispatch({type:"updatePoolConfig", pool: sub.name, patch:{
                 url: source.url.trim(),
                 update_interval: source.update_interval.trim(),
                 residential: source.residential,
-              }});
+              }, newName: nextName});
               if (ok) onClose();
             }}><Ic.check/> Save & fetch</button>
             <button className="btn danger ml-auto" onClick={async () => {

@@ -226,6 +226,8 @@
 日期：2026-05-07
 
 - [x] Subscriptions 编辑抽屉新增 Source 页签，支持修改订阅 URL、刷新间隔和家宽标识
+- [x] Subscriptions Source 页签支持修改订阅池展示名称
 - [x] Subscriptions 编辑抽屉新增删除订阅池入口
 - [x] 保存或删除节点池后重启订阅自动刷新协程，避免旧 interval 或已删除订阅继续执行
 - [x] 订阅拉取使用指定 Chrome User-Agent，并保留 fetch 底层错误原因且不暴露 URL query token
+- [x] 前端地区名称和旗帜映射补齐到后端地区表；英国 `UK` / `GB` 展示统一使用 `GB` 标准码

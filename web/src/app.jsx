@@ -343,9 +343,9 @@ function App() {
         case "updatePoolConfig": {
           const pool = findPool(state.pools, action.pool);
           if (!pool) throw new Error("pool not found");
-          const result = await api.updatePoolConfig(pool, action.patch);
+          const result = await api.updatePoolConfig(pool, action.patch, action.newName);
           await refreshData(true);
-          toast(`Saved ${action.pool}`);
+          toast(`Saved ${action.newName || action.pool}`);
           return result;
         }
         case "deletePool": {

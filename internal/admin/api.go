@@ -366,8 +366,9 @@ func (s *Server) handleNodePoolConfig(w http.ResponseWriter, r *http.Request) {
 // updateNodePool 更新节点池配置
 func (s *Server) updateNodePool(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name   string           `json:"name"`
-		Config *pool.PoolConfig `json:"config"`
+		Name    string           `json:"name"`
+		NewName string           `json:"new_name"`
+		Config  *pool.PoolConfig `json:"config"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -377,6 +378,7 @@ func (s *Server) updateNodePool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Name = strings.TrimSpace(req.Name)
+	req.NewName = strings.TrimSpace(req.NewName)
 	if req.Name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": "pool name is required",
@@ -415,7 +417,19 @@ func (s *Server) updateNodePool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config.NodePools[req.Name] = req.Config
+	targetName := req.Name
+	if req.NewName != "" && req.NewName != req.Name {
+		if _, exists := config.NodePools[req.NewName]; exists {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "pool name already exists",
+			})
+			return
+		}
+		delete(config.NodePools, req.Name)
+		targetName = req.NewName
+	}
+
+	config.NodePools[targetName] = req.Config
 	if err := s.saveAndReloadNodes(nodesPath, config); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": err.Error(),
@@ -425,7 +439,7 @@ func (s *Server) updateNodePool(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"message": "pool updated successfully",
-		"name":    req.Name,
+		"name":    targetName,
 	})
 }
 

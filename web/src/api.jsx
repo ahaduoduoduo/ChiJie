@@ -294,10 +294,10 @@
     return out;
   }
 
-  async function updatePool(name, config) {
+  async function updatePool(name, config, newName = "") {
     return request("/api/nodes/pool", {
       method: "PUT",
-      body: { name, config },
+      body: { name, new_name: newName, config },
     });
   }
 
@@ -339,9 +339,9 @@
       config.enabled = enabled;
       return updatePool(pool.name, config);
     },
-    updatePoolConfig: (pool, patch) => {
+    updatePoolConfig: (pool, patch, newName = "") => {
       const config = { ...cloneConfig(pool), ...patch };
-      return updatePool(pool.name, config);
+      return updatePool(pool.name, config, newName);
     },
     deletePool: (poolName) => request(`/api/nodes/pool?name=${encodeURIComponent(poolName)}`, { method: "DELETE" }),
     addStaticNode: (pool, node) => {
