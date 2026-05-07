@@ -2,6 +2,9 @@
 
 ```
 chijie/
+├── .github/
+│   └── workflows/
+│       └── dockerhub.yml        # GitHub Actions：构建 Linux AMD64 镜像并推送 Docker Hub
 ├── cmd/
 │   └── gateway/
 │       ├── main.go              # 入口：加载/校验配置、初始化各模块、启动并优雅关闭 HTTP 与 Admin 服务
@@ -69,14 +72,16 @@ chijie/
 ├── docs/
 │   ├── admin-frontend.md          # Admin 前端接入、构建方式和接口边界
 │   ├── docker-deployment.md       # Docker 构建、Compose 部署和端口模型
+│   ├── dockerhub-release.md       # Docker Hub 自动发布、Secrets 和 VPS 拉取镜像部署
 │   ├── parameter-driven-egress.md # 参数驱动出口模型
 │   ├── subscription-routing.md    # 订阅节点、地区组和模板节点说明
 │   └── tls-fingerprints.md        # TLS 指纹来源、extra_fp 兼容和测试接口语义
 ├── build.sh                     # 构建脚本：前端 build + 复制 dist + Go 编译
 ├── Dockerfile                   # 多阶段容器构建：前端 build + Go build + 运行镜像
 ├── docker-compose.yml           # Docker 部署：Proxy API 暴露，Admin 仅绑定宿主机本机地址
+├── docker-compose.prod.yml      # Docker Hub 镜像部署：VPS 只拉取镜像运行
 ├── docker-compose.amd64.yml     # ARM 机器构建 X86 镜像时使用的 Compose 覆盖文件
-├── .env.example                 # Docker 宿主机端口、配置目录和时区模板
+├── .env.example                 # Docker 镜像名、宿主机端口、配置目录和时区模板
 ├── .dockerignore                # Docker 构建上下文排除规则
 ├── go.mod
 ├── go.sum

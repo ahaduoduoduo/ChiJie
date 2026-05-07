@@ -205,8 +205,19 @@
 
 - [x] 新增多阶段 `Dockerfile`：前端构建、Go 构建、运行镜像分离
 - [x] 新增 `.dockerignore`，排除本地二进制、构建产物和 `configs/*.yaml`
-- [x] 新增 `docker-compose.yml`，Proxy API 暴露 `8080`，Admin 只绑定宿主机 `127.0.0.1:9090`
+- [x] 新增 `docker-compose.yml`，Proxy API 和 Admin 默认只绑定宿主机本机地址
 - [x] Compose 宿主机端口和配置目录改为 `.env` 可配置
 - [x] 新增 `docker-compose.amd64.yml`，支持 ARM 机器构建 X86 镜像
 - [x] 新增 `configs/gateway.docker.yaml.example`
 - [x] 新增 `docs/docker-deployment.md`
+
+## P17 — Docker Hub 自动发布 ✅
+日期：2026-05-07
+
+- [x] 新增 `.github/workflows/dockerhub.yml`，推送 `main` 后自动构建并发布 Docker Hub 镜像
+- [x] GitHub Actions 使用 `DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN` Secrets 登录 Docker Hub
+- [x] 镜像标签包含 `latest` 和当前 Git commit SHA
+- [x] 新增 `docker-compose.prod.yml`，VPS 生产环境只拉取镜像运行
+- [x] `.env.example` 新增 `CHIJIE_IMAGE`，默认指向 `ahaduoduoduo/chijie:latest`
+- [x] Docker 默认宿主机端口改为 `127.0.0.1:18080` 和 `127.0.0.1:19090`，便于 nginx 反向代理
+- [x] 新增 `docs/dockerhub-release.md`，说明 Docker Hub 仓库、GitHub Secrets 和 VPS 更新命令

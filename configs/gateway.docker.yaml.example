@@ -3,7 +3,7 @@ server:
   allow_private_targets: false
 
 admin:
-  # Docker 内监听所有地址，由 docker-compose 仅映射到宿主机 127.0.0.1:9090。
+  # Docker 内监听所有地址，由 docker-compose 仅映射到宿主机 127.0.0.1:19090。
   listen: ":9090"
   password: ""
   jwt_secret: ""

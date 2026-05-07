@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -74,9 +75,11 @@ func (p *SubscriptionParser) fetchOne(subURL string) ([]dialer.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create subscription request: %w", err)
 	}
+	req.Header.Set("User-Agent", "Chijie/1.0")
+	req.Header.Set("Accept", "text/plain, application/yaml, application/x-yaml, application/json, */*")
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %s failed", redactSubscriptionURL(subURL))
+		return nil, subscriptionFetchError(subURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -116,6 +119,16 @@ func (p *SubscriptionParser) fetchOne(subURL string) ([]dialer.Node, error) {
 	}
 
 	return p.parseURIList(string(decoded))
+}
+
+func subscriptionFetchError(raw string, err error) error {
+	redacted := redactSubscriptionURL(raw)
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) && urlErr.Err != nil {
+		return fmt.Errorf("fetch %s failed: %w", redacted, urlErr.Err)
+	}
+	message := strings.ReplaceAll(err.Error(), raw, redacted)
+	return fmt.Errorf("fetch %s failed: %s", redacted, message)
 }
 
 func validateSubscriptionURL(ctx context.Context, raw string) error {

@@ -21,10 +21,14 @@
 ## 快速开始
 
 ```bash
-# Docker 部署
+# Docker Hub 镜像部署（VPS 推荐）
 cp .env.example .env
 cp configs/gateway.docker.yaml.example configs/gateway.yaml
 cp configs/nodes.yaml.example configs/nodes.yaml
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+
+# 本机构建 Docker 镜像
 docker compose up -d --build
 
 # 完整构建（包含前端）
@@ -43,7 +47,7 @@ go build -tags with_utls -o chijie ./cmd/gateway/
 GOOS=linux GOARCH=amd64 go build -tags with_utls -o chijie ./cmd/gateway/
 ```
 
-管理页面默认地址：`http://127.0.0.1:9090/`
+Docker 宿主机默认 Admin 地址：`http://127.0.0.1:19090/`。通过 SSH tunnel 访问时，本机浏览器仍可使用 `http://127.0.0.1:9090/`。
 
 ## 配置文件
 
@@ -92,6 +96,7 @@ Admin 登录限速的客户端 IP 在 Cloudflare 部署下优先读取 `CF-Conne
 Admin 前端接入和构建说明详见 [docs/admin-frontend.md](docs/admin-frontend.md)。
 TLS 指纹配置、`extra_fp` 兼容和测试接口详见 [docs/tls-fingerprints.md](docs/tls-fingerprints.md)。
 Docker 部署详见 [docs/docker-deployment.md](docs/docker-deployment.md)。
+Docker Hub 自动发布详见 [docs/dockerhub-release.md](docs/dockerhub-release.md)。
 目录和模块职责详见 [DETAILS.md](DETAILS.md)。
 
 ## 出口协议

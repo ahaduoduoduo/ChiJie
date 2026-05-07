@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -159,6 +160,49 @@ func TestFetchReportsAllSubscriptionURLFailures(t *testing.T) {
 	}
 }
 
+func TestFetchNetworkErrorKeepsCauseAndRedactsURL(t *testing.T) {
+	parser := NewSubscriptionParser()
+	parser.client = &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, fmt.Errorf("dial tcp: test network failure")
+		}),
+	}
+
+	_, err := parser.Fetch("https://example.com/sub?token=secret")
+	if err == nil {
+		t.Fatalf("expected network error")
+	}
+	if !strings.Contains(err.Error(), "test network failure") {
+		t.Fatalf("subscription error should keep network cause: %v", err)
+	}
+	if strings.Contains(err.Error(), "token=secret") || strings.Contains(err.Error(), "?") {
+		t.Fatalf("subscription error should not expose query strings: %v", err)
+	}
+}
+
+func TestFetchSendsSubscriptionHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("User-Agent"); !strings.Contains(got, "Chijie") {
+			t.Fatalf("unexpected user agent: %q", got)
+		}
+		if got := r.Header.Get("Accept"); !strings.Contains(got, "application/yaml") {
+			t.Fatalf("unexpected accept header: %q", got)
+		}
+		_, _ = w.Write([]byte("ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNz@example.com:8388#headers"))
+	}))
+	defer server.Close()
+
+	parser := NewSubscriptionParser()
+	parser.client = subscriptionTestClient(t, server)
+	nodes, err := parser.Fetch("http://example.com/sub")
+	if err != nil {
+		t.Fatalf("fetch subscription: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Name != "headers" {
+		t.Fatalf("unexpected nodes: %#v", nodes)
+	}
+}
+
 func TestValidateSubscriptionURLRejectsPrivateHosts(t *testing.T) {
 	if err := validateSubscriptionURL(context.Background(), "http://127.0.0.1/sub"); err == nil {
 		t.Fatalf("expected private subscription host to be rejected")
@@ -187,4 +231,10 @@ func subscriptionTestClient(t *testing.T, server *httptest.Server) *http.Client 
 		},
 	}
 	return &http.Client{Transport: transport}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }

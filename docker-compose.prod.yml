@@ -2,10 +2,7 @@ name: chijie
 
 services:
   chijie:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: chijie:latest
+    image: "${CHIJIE_IMAGE:-ahaduoduoduo/chijie:latest}"
     container_name: chijie
     restart: unless-stopped
     ports:
