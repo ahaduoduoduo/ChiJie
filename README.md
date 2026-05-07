@@ -25,6 +25,7 @@
 cp .env.example .env
 cp configs/gateway.docker.yaml.example configs/gateway.yaml
 cp configs/nodes.yaml.example configs/nodes.yaml
+cp configs/fingerprints.yaml.example configs/fingerprints.yaml
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 
@@ -60,6 +61,7 @@ Docker 宿主机默认 Admin 地址：`http://127.0.0.1:19090/`。通过 SSH tun
 ```bash
 cp configs/gateway.yaml.example configs/gateway.yaml
 cp configs/nodes.yaml.example configs/nodes.yaml
+cp configs/fingerprints.yaml.example configs/fingerprints.yaml
 # 编辑 gateway.yaml，至少要：
 #   - 设置 admin.password（或保持 listen=127.0.0.1 并留空 password）
 #   - 设置 admin.jwt_secret（长度 ≥ 16，禁止占位字符串）
@@ -91,6 +93,7 @@ Admin 登录限速的客户端 IP 在 Cloudflare 部署下优先读取 `CF-Conne
 
 `/tunnel` WebSocket 默认拒绝跨站浏览器升级（无 Origin 放行；有 Origin 必须同源），不影响 Cloudflare Workers / Go / Node.js / Python 等服务端客户端。
 
+外部服务接入 Proxy API 详见 [docs/proxy-client-usage.md](docs/proxy-client-usage.md)。
 参数驱动出口模型详见 [docs/parameter-driven-egress.md](docs/parameter-driven-egress.md)。
 订阅节点地区识别、节点元数据和模板语义详见 [docs/subscription-routing.md](docs/subscription-routing.md)。
 Admin 前端接入和构建说明详见 [docs/admin-frontend.md](docs/admin-frontend.md)。

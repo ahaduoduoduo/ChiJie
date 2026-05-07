@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -891,7 +892,9 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	// 重载指纹库
 	if s.fpManager != nil {
 		fpPath := s.configDir + "/fingerprints.yaml"
-		if err := s.fpManager.LoadFromFile(fpPath); err != nil {
+		if _, err := os.Stat(fpPath); stderrors.Is(err, os.ErrNotExist) {
+			log.Printf("admin: fingerprints config not found, skipping: %s", fpPath)
+		} else if err := s.fpManager.LoadFromFile(fpPath); err != nil {
 			errors = append(errors, "fingerprints: "+err.Error())
 		}
 	}
@@ -1427,16 +1430,12 @@ func (s *Server) addFingerprint(w http.ResponseWriter, r *http.Request) {
 
 	// 读取现有指纹配置
 	fpPath := filepath.Join(s.configDir, "fingerprints.yaml")
-	var config fingerprint.FileConfig
-	if err := loadYAML(fpPath, &config); err != nil {
+	config, err := loadFingerprintsConfig(fpPath)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": "failed to load fingerprints: " + err.Error(),
 		})
 		return
-	}
-
-	if config.Fingerprints == nil {
-		config.Fingerprints = make(map[string]*fingerprint.FingerprintConfig)
 	}
 
 	// 检查是否已存在
@@ -1451,7 +1450,7 @@ func (s *Server) addFingerprint(w http.ResponseWriter, r *http.Request) {
 	config.Fingerprints[req.Name] = req.Config
 
 	// 保存到文件
-	if err := s.saveFingerprintsToFile(fpPath, &config); err != nil {
+	if err := s.saveFingerprintsToFile(fpPath, config); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": "failed to save fingerprints: " + err.Error(),
 		})
@@ -1492,8 +1491,8 @@ func (s *Server) handleFingerprintByName(w http.ResponseWriter, r *http.Request)
 
 	// 读取现有指纹配置
 	fpPath := filepath.Join(s.configDir, "fingerprints.yaml")
-	var config fingerprint.FileConfig
-	if err := loadYAML(fpPath, &config); err != nil {
+	config, err := loadFingerprintsConfig(fpPath)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": "failed to load fingerprints: " + err.Error(),
 		})
@@ -1512,7 +1511,7 @@ func (s *Server) handleFingerprintByName(w http.ResponseWriter, r *http.Request)
 	delete(config.Fingerprints, fpName)
 
 	// 保存到文件
-	if err := s.saveFingerprintsToFile(fpPath, &config); err != nil {
+	if err := s.saveFingerprintsToFile(fpPath, config); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": "failed to save fingerprints: " + err.Error(),
 		})
@@ -1535,6 +1534,19 @@ func (s *Server) handleFingerprintByName(w http.ResponseWriter, r *http.Request)
 // saveFingerprintsToFile 保存指纹到 YAML 文件（保留兼容签名）。
 func (s *Server) saveFingerprintsToFile(path string, config *fingerprint.FileConfig) error {
 	return atomicWriteYAML(path, config)
+}
+
+func loadFingerprintsConfig(path string) (*fingerprint.FileConfig, error) {
+	var config fingerprint.FileConfig
+	if err := loadYAML(path, &config); err != nil {
+		if !stderrors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+	if config.Fingerprints == nil {
+		config.Fingerprints = make(map[string]*fingerprint.FingerprintConfig)
+	}
+	return &config, nil
 }
 
 // handleFingerprintTest POST 测试指纹

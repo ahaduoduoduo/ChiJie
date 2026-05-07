@@ -31,6 +31,7 @@ http://127.0.0.1:9090/
 cp .env.example .env
 cp configs/gateway.docker.yaml.example configs/gateway.yaml
 cp configs/nodes.yaml.example configs/nodes.yaml
+cp configs/fingerprints.yaml.example configs/fingerprints.yaml
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
@@ -41,6 +42,7 @@ docker compose -f docker-compose.prod.yml up -d
 cp .env.example .env
 cp configs/gateway.docker.yaml.example configs/gateway.yaml
 cp configs/nodes.yaml.example configs/nodes.yaml
+cp configs/fingerprints.yaml.example configs/fingerprints.yaml
 docker compose up -d --build
 ```
 

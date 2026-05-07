@@ -1,15 +1,46 @@
 // Overview — minimal, focused on what matters at a glance
 const { Sparkline, BarChart, fmtAgo, StatusCode, RegionPill } = window.UI;
 
+function isTrafficSuccess(row) {
+  return row.status > 0 && row.status < 400 && !row.error;
+}
+
+function isTrafficError(row) {
+  return row.status === 0 || row.status >= 400 || !!row.error;
+}
+
+function RecentTrafficCard({ title, rows, empty, detail }) {
+  return (
+    <div className="card card-pad-0" style={{marginBottom: 20}}>
+      <div className="card-h bordered"><h3>{title}</h3><span className="sub">{rows.length} in window</span></div>
+      {rows.length === 0
+        ? <div className="empty">{empty}</div>
+        : <table className="table">
+            <thead><tr><th>Time</th><th>Region</th><th>Pool</th><th>Status</th><th>Detail</th></tr></thead>
+            <tbody>{rows.map(r => (
+              <tr key={r.id}>
+                <td className="mono muted-2">{fmtAgo(r.ts)} ago</td>
+                <td><RegionPill code={r.group} residential={r.residential}/></td>
+                <td className="mono">{r.pool}</td>
+                <td><StatusCode code={r.status}/></td>
+                <td className="muted truncate" style={{maxWidth:360}}>{detail(r)}</td>
+              </tr>
+            ))}</tbody>
+          </table>}
+    </div>
+  );
+}
+
 function PageOverview({ state }) {
   const { pools, traffic, regionGroups, stats } = state;
   const totalNodes = pools.flatMap(p => p.nodes || []).length;
   const onlineNodes = pools.flatMap(p => p.nodes || []).filter(n => n.alive && n.enabled).length;
   const recent = traffic.requests;
-  const ok = recent.filter(r => r.status >= 200 && r.status < 400).length;
+  const ok = recent.filter(isTrafficSuccess).length;
   const successRate = traffic.metrics?.requests ? (traffic.metrics.success_rate * 100).toFixed(1) : (recent.length ? (ok / recent.length * 100).toFixed(1) : "100.0");
   const p95 = traffic.metrics?.p95_latency_ms || Math.round(traffic.series.slice(-10).reduce((a,b) => a + b.p95, 0) / 10);
-  const errs = recent.filter(r => r.status === 0 || r.status >= 500 || r.status === 429).slice(0, 5);
+  const successes = recent.filter(isTrafficSuccess).slice(0, 5);
+  const errs = recent.filter(isTrafficError).slice(0, 5);
   const uptime = stats?.uptime ? stats.uptime.replace(/(\.\d+)?s$/, "s") : "—";
 
   return (
@@ -76,23 +107,19 @@ function PageOverview({ state }) {
         </div>
       </div>
 
-      <div className="card card-pad-0">
-        <div className="card-h bordered"><h3>Recent errors</h3><span className="sub">{errs.length} in window</span></div>
-        {errs.length === 0
-          ? <div className="empty">No errors. Egress is clean.</div>
-          : <table className="table">
-              <thead><tr><th>Time</th><th>Region</th><th>Pool</th><th>Status</th><th>Detail</th></tr></thead>
-              <tbody>{errs.map(r => (
-                <tr key={r.id}>
-                  <td className="mono muted-2">{fmtAgo(r.ts)} ago</td>
-                  <td><RegionPill code={r.group} residential={r.residential}/></td>
-                  <td className="mono">{r.pool}</td>
-                  <td><StatusCode code={r.status}/></td>
-                  <td className="muted truncate" style={{maxWidth:240}}>{r.error || "—"}</td>
-                </tr>
-              ))}</tbody>
-            </table>}
-      </div>
+      <RecentTrafficCard
+        title="Recent success"
+        rows={successes}
+        empty="No successful requests in the current window."
+        detail={r => r.url || r.node || "—"}
+      />
+
+      <RecentTrafficCard
+        title="Recent errors"
+        rows={errs}
+        empty="No errors. Egress is clean."
+        detail={r => r.error || r.url || r.node || "—"}
+      />
     </div>
   );
 }

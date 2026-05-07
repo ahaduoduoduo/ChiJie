@@ -51,9 +51,9 @@ chijie/
 │   │   ├── data.jsx             # 地区名称、旗帜、地区组和模拟数据辅助函数
 │   │   ├── ui.jsx               # 共享 UI：弹窗、抽屉、开关、分段控件、图表、Toast
 │   │   ├── icons.jsx            # 控制台图标
-│   │   ├── page-overview.jsx    # Overview：运行状态、节点在线数、成功率、地区组、近期错误
+│   │   ├── page-overview.jsx    # Overview：运行状态、节点在线数、成功率、地区组、最近成功和错误请求
 │   │   ├── page-egress.jsx      # Egress：地区组、节点表、节点启停、测试、静态节点新增/删除
-│   │   ├── page-subscriptions.jsx # Subscriptions：订阅新增、刷新、启停、元数据和 reject_regex 保存
+│   │   ├── page-subscriptions.jsx # Subscriptions：订阅新增、刷新、启停、元数据、reject_regex 保存和窄屏订阅卡片布局
 │   │   ├── page-templates.jsx   # Templates：模板池新增、启停、删除和用户名模板预览
 │   │   ├── page-tls.jsx         # TLS Profiles：指纹新增、删除、测试
 │   │   ├── page-traffic.jsx     # Traffic：请求日志、流量序列、详情抽屉、CSV 导出
@@ -68,12 +68,15 @@ chijie/
 │   ├── gateway.yaml             # 主配置：端口、TLS、认证密钥、Admin 鉴权、日志
 │   ├── gateway.docker.yaml.example # Docker 场景主配置模板
 │   ├── nodes.yaml               # 节点池配置
-│   └── fingerprints.yaml        # TLS 指纹库
+│   ├── nodes.yaml.example       # 节点池配置模板
+│   ├── fingerprints.yaml        # TLS 指纹库
+│   └── fingerprints.yaml.example # TLS 指纹库空模板
 ├── docs/
 │   ├── admin-frontend.md          # Admin 前端接入、构建方式和接口边界
 │   ├── docker-deployment.md       # Docker 构建、Compose 部署和端口模型
 │   ├── dockerhub-release.md       # Docker Hub 自动发布、Secrets 和 VPS 拉取镜像部署
 │   ├── parameter-driven-egress.md # 参数驱动出口模型
+│   ├── proxy-client-usage.md      # 外部服务接入 Proxy API 的独立使用文档
 │   ├── subscription-routing.md    # 订阅节点、地区组和模板节点说明
 │   └── tls-fingerprints.md        # TLS 指纹来源、extra_fp 兼容和测试接口语义
 ├── build.sh                     # 构建脚本：前端 build + 复制 dist + Go 编译

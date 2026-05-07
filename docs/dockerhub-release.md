@@ -58,6 +58,10 @@ DOCKERHUB_TOKEN
 生产环境使用拉镜像专用 Compose 文件：
 
 ```bash
+cp .env.example .env
+cp configs/gateway.docker.yaml.example configs/gateway.yaml
+cp configs/nodes.yaml.example configs/nodes.yaml
+cp configs/fingerprints.yaml.example configs/fingerprints.yaml
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
@@ -98,4 +102,3 @@ docker compose -f docker-compose.prod.yml logs -f chijie
 ```
 
 配置文件挂载自宿主机 `configs/`，镜像更新不会覆盖 `gateway.yaml`、`nodes.yaml` 和 `fingerprints.yaml`。
-

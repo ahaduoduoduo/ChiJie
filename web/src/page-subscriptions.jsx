@@ -9,7 +9,7 @@ function PageSubscriptions({ state, dispatch }) {
   const toast = useToast();
 
   return (
-    <div className="page">
+    <div className="page subscriptions-page">
       <div className="page-h">
         <div>
           <h1>Subscriptions</h1>
@@ -26,41 +26,41 @@ function PageSubscriptions({ state, dispatch }) {
           const online = s.nodes.filter(n => n.alive && n.enabled).length;
           const regions = Array.from(new Set(s.nodes.map(n => n.region))).filter(Boolean);
           return (
-            <div key={s.name} className="card">
-              <div className="card-h bordered">
-                <div className="row gap-12">
+            <div key={s.name} className="card subscription-card">
+              <div className="card-h bordered subscription-card-header">
+                <div className="row gap-12 subscription-title">
                   <h3 className="mono">{s.name}</h3>
                   {s.residential && <span className="pill res">residential</span>}
                 </div>
-                <div className="right">
-                  <span className="muted-2 mono" style={{fontSize:11, marginRight:8}}>refresh {s.update_interval} · last {s.last_updated}</span>
+                <div className="right subscription-actions">
+                  <span className="muted-2 mono subscription-runtime">refresh {s.update_interval} · last {s.last_updated}</span>
                   <button className="btn sm ghost" onClick={() => dispatch({type:"refreshSub", name: s.name})}><Ic.refresh/> Refresh</button>
                   <button className="btn sm ghost" onClick={() => setOpenSub(s)}><Ic.edit/> Edit</button>
                   <Toggle on={s.enabled} onChange={() => dispatch({type:"togglePool", name:s.name})}/>
                 </div>
               </div>
 
-              <div className="card-body" style={{display:"grid", gridTemplateColumns:"1.4fr 1fr 1fr 1fr", gap:32}}>
-                <div>
-                  <div className="muted-2" style={{fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", fontWeight:500}}>Source</div>
-                  <div className="mono truncate" style={{fontSize:11.5, marginTop:8, color:"var(--fg-1)"}}>{s.url}</div>
-                  {s.last_error && <div style={{marginTop:10, fontSize:11.5, color:"var(--fg-2)", display:"flex",alignItems:"center",gap:6}}><span style={{width:5,height:5,borderRadius:"50%",background:"var(--fg-1)"}}/>{s.last_error}</div>}
+              <div className="card-body subscription-summary-grid">
+                <div className="subscription-summary-item">
+                  <div className="subscription-section-label">Source</div>
+                  <div className="mono truncate subscription-url">{s.url}</div>
+                  {s.last_error && <div className="subscription-error"><span />{s.last_error}</div>}
                 </div>
-                <div>
-                  <div className="muted-2" style={{fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", fontWeight:500}}>Nodes online</div>
+                <div className="subscription-summary-item">
+                  <div className="subscription-section-label">Nodes online</div>
                   <div className="mono" style={{fontSize:24, fontWeight:400, letterSpacing:"-0.02em", marginTop:10, lineHeight:1}}>
                     {online}<span className="muted-2" style={{fontSize:13}}>/{total}</span>
                   </div>
                   <div className="progress" style={{marginTop:10}}><div style={{width: `${(online/total)*100||0}%`}}/></div>
                 </div>
-                <div>
-                  <div className="muted-2" style={{fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", fontWeight:500}}>Region groups</div>
+                <div className="subscription-summary-item">
+                  <div className="subscription-section-label">Region groups</div>
                   <div className="row" style={{gap:4, flexWrap:"wrap", marginTop:10}}>
                     {regions.map(r => <RegionPill key={r} code={r}/>)}
                   </div>
                 </div>
-                <div>
-                  <div className="muted-2" style={{fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", fontWeight:500}}>Reject filters</div>
+                <div className="subscription-summary-item">
+                  <div className="subscription-section-label">Reject filters</div>
                   <div className="col" style={{gap:4, marginTop:10}}>
                     {(s.reject_regex || []).slice(0,3).map((r,i) => <span key={i} className="mono muted truncate" style={{fontSize:11}}>{r}</span>)}
                     {!(s.reject_regex || []).length && <span className="muted-2" style={{fontSize:11}}>none</span>}
@@ -68,12 +68,12 @@ function PageSubscriptions({ state, dispatch }) {
                 </div>
               </div>
 
-              <div style={{borderTop:"1px solid var(--line)", padding:"14px 20px", display:"flex", gap:6, flexWrap:"wrap", alignItems:"center"}}>
-                <span className="muted-2" style={{fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", marginRight:6, fontWeight:500}}>Nodes</span>
+              <div className="subscription-node-strip">
+                <span className="subscription-section-label subscription-node-label">Nodes</span>
                 {s.nodes.slice(0, 14).map(n => (
-                  <span key={n.id} className="pill mono" style={{maxWidth:200, opacity: n.alive && n.enabled ? 1 : 0.45}}>
+                  <span key={n.id} className="pill mono subscription-node-pill" style={{opacity: n.alive && n.enabled ? 1 : 0.45}}>
                     <span style={{display:"inline-block",width:5,height:5,borderRadius:"50%",background: n.alive && n.enabled ? "#fafafa" : "var(--fg-3)", boxShadow: n.alive && n.enabled ? "0 0 4px rgba(255,255,255,0.5)" : "none"}}/>
-                    <span className="truncate" style={{maxWidth:160}}>{n.name}</span>
+                    <span className="truncate subscription-node-name">{n.name}</span>
                   </span>
                 ))}
                 {s.nodes.length > 14 && <span className="muted-2 mono" style={{fontSize:11}}>+{s.nodes.length - 14}</span>}

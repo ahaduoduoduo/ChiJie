@@ -231,3 +231,26 @@
 - [x] 保存或删除节点池后重启订阅自动刷新协程，避免旧 interval 或已删除订阅继续执行
 - [x] 订阅拉取使用指定 Chrome User-Agent，并保留 fetch 底层错误原因且不暴露 URL query token
 - [x] 前端地区名称和旗帜映射补齐到后端地区表；英国 `UK` / `GB` 展示统一使用 `GB` 标准码
+- [x] 新增 `configs/fingerprints.yaml.example`，Admin reload 和指纹新增在缺少 `fingerprints.yaml` 时不再报错
+
+## P19 — Proxy API 调用文档 ✅
+日期：2026-05-07
+
+- [x] 新增 `docs/proxy-client-usage.md`，面向外部服务、脚本、Cloudflare Workers 和 AI Agent 说明 Proxy API 调用方式
+- [x] 文档覆盖 `/health`、`/proxy`、`/tunnel`、Bearer 鉴权、出口参数、错误响应、限制和最小 AI Agent 调用说明
+- [x] `README.md` 和 `DETAILS.md` 补充 Proxy API 使用文档入口
+
+## P20 — Subscriptions 窄屏布局修正 ✅
+日期：2026-05-07
+
+- [x] Subscriptions 订阅卡片改用专用响应式 class，避免移动端继承通用卡片横向滚动
+- [x] 窄屏下订阅摘要从四列改为单列，订阅 URL 使用自动换行，不再撑宽卡片
+- [x] 订阅卡片头部操作区在窄屏下分行展示，刷新时间、Refresh、Edit 和启停开关不再挤压
+- [x] 节点列表仅在自身条带内横向滚动，卡片主体保持视口宽度内排版
+
+## P21 — Overview 近期请求列表修正 ✅
+日期：2026-05-07
+
+- [x] Overview `Recent errors` 的错误筛选改为与 Traffic 页一致，覆盖 `status >= 400`、`status == 0` 和有错误 detail 的请求
+- [x] Overview `Recent errors` 在目标站点返回 4xx 且无后端错误 detail 时显示目标 URL
+- [x] Overview 新增 `Recent success`，展示最近 5 条成功请求

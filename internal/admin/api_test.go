@@ -2,6 +2,7 @@ package admin
 
 import (
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -41,5 +42,18 @@ func TestClientIPFromRequestSkipsInvalidForwardedValues(t *testing.T) {
 
 	if got := clientIPFromRequest(req); got != "198.51.100.7" {
 		t.Fatalf("clientIPFromRequest = %q, want first valid forwarded IP", got)
+	}
+}
+
+func TestLoadFingerprintsConfigAllowsMissingFile(t *testing.T) {
+	cfg, err := loadFingerprintsConfig(filepath.Join(t.TempDir(), "fingerprints.yaml"))
+	if err != nil {
+		t.Fatalf("load missing fingerprints config: %v", err)
+	}
+	if cfg.Fingerprints == nil {
+		t.Fatalf("fingerprints map should be initialized")
+	}
+	if len(cfg.Fingerprints) != 0 {
+		t.Fatalf("expected empty fingerprints map, got %d entries", len(cfg.Fingerprints))
 	}
 }

@@ -1,0 +1,445 @@
+# Chijie Proxy API 使用文档
+
+日期：2026-05-07
+
+本文面向接入 Chijie 的业务服务、脚本、Cloudflare Workers 或 AI Agent。调用方不需要访问 Admin API，只需要拿到 `Proxy API` 地址和一个 `proxy_token`。
+
+## 接入信息
+
+服务所有者需要提供：
+
+```bash
+CHIJIE_BASE_URL="https://proxy.example.com"
+CHIJIE_PROXY_TOKEN="eyJ..."
+```
+
+`CHIJIE_BASE_URL` 指向 Proxy API
+
+所有代理请求都使用 Bearer token：
+
+```http
+Authorization: Bearer <proxy_token>
+```
+
+
+## 接口总览
+
+| Method | Path | 鉴权 | 用途 |
+| --- | --- | --- | --- |
+| `GET` | `/health` | 否 | 存活检查 |
+| `POST` | `/proxy` | 是 | 发起一次 HTTP / HTTPS 目标请求 |
+| `WS` / `WSS` | `/tunnel` | 是 | 建立 WebSocket 隧道或 raw TCP 隧道 |
+
+## 健康检查
+
+```bash
+curl "$CHIJIE_BASE_URL/health"
+```
+
+正常响应：
+
+```json
+{"status":"ok"}
+```
+
+该接口只表示 Chijie Proxy API 进程可访问，不代表某个出口节点可用。
+
+## POST /proxy
+
+`/proxy` 用于让 Chijie 代替调用方发起一次目标 HTTP / HTTPS 请求，并按请求里的 `egress` 参数选择出口。
+
+### 请求格式
+
+```http
+POST /proxy
+Authorization: Bearer <proxy_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "url": "https://target.example/api/data",
+  "method": "POST",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "payload": "{\"hello\":\"world\"}",
+  "egress": {
+    "region": "US",
+    "strategy": "least-latency",
+    "residential": false,
+    "tls_fingerprint": "chrome"
+  }
+}
+```
+
+### 字段说明
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `url` | string | 是 | 目标 URL，`/proxy` 建议使用 `http://` 或 `https://` |
+| `method` | string | 否 | 目标请求方法，默认 `GET` |
+| `headers` | object | 否 | 发送给目标站点的请求 Header |
+| `payload` | string | 否 | 发送给目标站点的请求 Body；`GET` / `HEAD` 会忽略该字段 |
+| `egress.region` | string | 否 | 二字母地区码，例如 `US`、`HK`、`JP`、`GB`；为空表示直连 |
+| `egress.any` | boolean | 否 | 为 `true` 时选择任意非直连出口 |
+| `egress.max_latency_ms` | number | 否 | 配合 `any=true` 使用，按最近健康检查延迟过滤候选出口 |
+| `egress.strategy` | string | 否 | `random`、`round-robin`、`least-latency`，默认 `random` |
+| `egress.residential` | boolean | 否 | 是否要求家宽出口 |
+| `egress.tls_fingerprint` | string | 否 | TLS 指纹名称或指纹配置字符串，例如 `chrome` |
+
+地区码会标准化为大写二字母代码。英国使用标准码 `GB`；传入 `UK` 时也会归一为 `GB`。
+
+### 响应格式
+
+成功时，Chijie 返回目标服务器的 HTTP status code、`Content-Type` 和响应体。响应体不是固定 JSON 包装，而是目标站点原始响应体。
+
+例如目标站点返回 `200 application/json`：
+
+```json
+{"ip":"203.0.113.10"}
+```
+
+目标站点返回 `302` 时，Chijie 默认不自动跟随跳转，而是把 `302` 响应返回给调用方。
+
+失败时，Chijie 返回 JSON：
+
+```json
+{
+  "error": "proxy request failed",
+  "detail": "do request via US-01: context deadline exceeded"
+}
+```
+
+常见错误：
+
+| HTTP 状态 | `error` | 含义 |
+| --- | --- | --- |
+| `400` | `invalid json` | 请求体不是合法 JSON |
+| `400` | `url required` | 缺少 `url` |
+| `400` | `invalid target` | 目标 URL 不合法，或被私网 / 回环地址防护拦截 |
+| `400` | `egress failed` | 出口参数无效，或没有可用出口 |
+| `403` | `unauthorized` | token 缺失、错误或过期 |
+| `405` | `method not allowed` | `/proxy` 只接受 `POST` |
+| `502` | `proxy request failed` | 已选择出口，但目标请求失败 |
+
+### 调用示例：直连请求
+
+```bash
+curl -sS "$CHIJIE_BASE_URL/proxy" \
+  -H "Authorization: Bearer $CHIJIE_PROXY_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-binary '{
+    "url": "https://api.ipify.org?format=json",
+    "method": "GET"
+  }'
+```
+
+不传 `egress.region` 且 `egress.any` 不为 `true` 时使用直连出口。
+
+### 调用示例：指定美国出口
+
+```bash
+curl -sS "$CHIJIE_BASE_URL/proxy" \
+  -H "Authorization: Bearer $CHIJIE_PROXY_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-binary '{
+    "url": "https://api.ipify.org?format=json",
+    "method": "GET",
+    "egress": {
+      "region": "US",
+      "strategy": "least-latency"
+    }
+  }'
+```
+
+### 调用示例：POST JSON 到目标服务
+
+```bash
+curl -sS "$CHIJIE_BASE_URL/proxy" \
+  -H "Authorization: Bearer $CHIJIE_PROXY_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-binary '{
+    "url": "https://target.example/api/orders",
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    },
+    "payload": "{\"order_id\":\"demo-001\"}",
+    "egress": {
+      "region": "JP",
+      "strategy": "round-robin",
+      "tls_fingerprint": "chrome"
+    }
+  }'
+```
+
+### Node.js 示例
+
+```js
+const baseURL = process.env.CHIJIE_BASE_URL;
+const token = process.env.CHIJIE_PROXY_TOKEN;
+
+async function callViaChijie(targetURL, options = {}) {
+  const response = await fetch(`${baseURL}/proxy`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      url: targetURL,
+      method: options.method || "GET",
+      headers: options.headers || {},
+      payload: options.payload || "",
+      egress: options.egress || {}
+    })
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const body = await response.text();
+
+  if (!response.ok && contentType.includes("application/json")) {
+    throw new Error(`Chijie proxy failed: ${body}`);
+  }
+
+  return {
+    status: response.status,
+    contentType,
+    body
+  };
+}
+
+const result = await callViaChijie("https://api.ipify.org?format=json", {
+  egress: { region: "US", strategy: "least-latency" }
+});
+
+console.log(result.status, result.body);
+```
+
+### Python 示例
+
+```python
+import os
+import requests
+
+base_url = os.environ["CHIJIE_BASE_URL"]
+token = os.environ["CHIJIE_PROXY_TOKEN"]
+
+resp = requests.post(
+    f"{base_url}/proxy",
+    headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    },
+    json={
+        "url": "https://api.ipify.org?format=json",
+        "method": "GET",
+        "egress": {
+            "region": "US",
+            "strategy": "least-latency",
+        },
+    },
+    timeout=60,
+)
+
+print(resp.status_code, resp.text)
+```
+
+## WebSocket /tunnel
+
+`/tunnel` 用于长连接场景。连接建立后，调用方发送第一条 JSON 初始化帧，Chijie 根据该帧完成认证、出口选择和目标连接。
+
+### 连接地址
+
+```text
+wss://proxy.example.com/tunnel
+```
+
+本地或内网测试也可以使用：
+
+```text
+ws://127.0.0.1:18080/tunnel
+```
+
+### 首帧格式
+
+```json
+{
+  "url": "wss://target.example/ws",
+  "authorization": "Bearer <proxy_token>",
+  "method": "GET",
+  "headers": {
+    "Authorization": "Bearer target-site-token"
+  },
+  "payload": "",
+  "egress": {
+    "region": "US",
+    "strategy": "round-robin",
+    "residential": false,
+    "tls_fingerprint": "chrome"
+  }
+}
+```
+
+非浏览器客户端也可以在 WebSocket 握手 Header 里带：
+
+```http
+Authorization: Bearer <proxy_token>
+```
+
+浏览器 WebSocket API 不能设置自定义握手 Header，因此浏览器客户端需要把 `authorization` 放在首帧 JSON 里。注意：不要把长期有效的 `proxy_token` 放到公开网页前端代码中。
+
+### 隧道模式
+
+| `url` scheme | 行为 |
+| --- | --- |
+| `ws://` / `wss://` | Chijie 对上游目标执行 WebSocket 握手，后续 WebSocket 消息双向转发 |
+| `http://` / `https://` | Chijie 连接目标主机端口，后续数据按 raw TCP 双向转发 |
+
+连接成功后，Chijie 会先发一条文本消息：
+
+```json
+{"status":"connected"}
+```
+
+之后进入双向转发。
+
+失败时，Chijie 会返回错误文本帧：
+
+```json
+{"error":"unauthorized"}
+```
+
+常见错误包括：
+
+- `invalid init frame`
+- `unauthorized`
+- `url required`
+- `invalid target`
+- `egress failed`
+- `get dialer failed`
+- `dial target failed`
+- `dial websocket target failed`
+- `tls fingerprint failed`
+
+## 出口选择规则
+
+### 直连
+
+```json
+{
+  "egress": {}
+}
+```
+
+或不传 `egress`。适合只需要 Chijie 代发请求，但不需要代理出口的场景。
+
+### 指定地区
+
+```json
+{
+  "egress": {
+    "region": "SG",
+    "strategy": "least-latency"
+  }
+}
+```
+
+指定地区时，Chijie 会选择对应地区组里的可用节点；如果配置了模板节点，也可以按地区动态生成出口。
+
+### 任意非直连出口
+
+```json
+{
+  "egress": {
+    "any": true,
+    "strategy": "least-latency",
+    "max_latency_ms": 800
+  }
+}
+```
+
+也可以写：
+
+```json
+{
+  "egress": {
+    "region": "ANY"
+  }
+}
+```
+
+`any=true` 不会选择直连出口，也不会选择必须依赖明确地区码的模板节点。
+
+### 家宽出口
+
+```json
+{
+  "egress": {
+    "region": "US",
+    "residential": true,
+    "strategy": "least-latency"
+  }
+}
+```
+
+家宽出口会查找 `US-RES` 这类地区组。是否可用取决于服务所有者是否配置了家宽节点或家宽模板。
+
+### TLS 指纹
+
+```json
+{
+  "egress": {
+    "region": "US",
+    "tls_fingerprint": "chrome"
+  }
+}
+```
+
+`tls_fingerprint` 可使用 Chijie 后台配置的指纹名，也可使用支持的预设或指纹字符串。调用方没有特殊需求时可以不传。
+
+## 限制与安全行为
+
+- `/proxy` 请求 JSON body 上限为 `10 MB`。
+- `/proxy` 上游响应 body 上限为 `32 MB`。
+- `/proxy` 目标请求超时时间为 `30s`。
+- `/proxy` 默认不自动跟随 HTTP redirect。
+
+## 给 AI Agent 的最小说明
+
+把下面这段提供给需要调用 Chijie 的 AI Agent：
+
+```text
+你可以通过 Chijie Proxy API 代发 HTTP 请求。
+
+Base URL: <CHIJIE_BASE_URL>
+Auth Header: Authorization: Bearer <CHIJIE_PROXY_TOKEN>
+
+接口：
+POST <CHIJIE_BASE_URL>/proxy
+Content-Type: application/json
+
+请求 JSON：
+{
+  "url": "https://target.example/path",
+  "method": "GET",
+  "headers": {},
+  "payload": "",
+  "egress": {
+    "region": "US",
+    "strategy": "least-latency",
+    "residential": false,
+    "tls_fingerprint": "chrome"
+  }
+}
+
+规则：
+- 不需要代理时省略 egress 或传空对象。
+- 指定地区时使用二字母地区码；英国使用 GB，UK 也会被归一为 GB。
+- 任意代理出口用 {"any": true}。
+- 成功响应是目标站点的原始 status code 和响应体。
+- Chijie 自身错误会返回 JSON：{"error":"...","detail":"..."}。
+- 不要访问内网、回环或 metadata 地址；默认会被拒绝。
+```
