@@ -1,0 +1,28 @@
+server:
+  listen: ":8080"
+  # 是否允许 /proxy 和 /tunnel 拨向私网/回环地址。默认 false 防 SSRF。
+  # 仅在确实需要代理到内网服务时设为 true。
+  allow_private_targets: false
+  # TLS 配置（生产环境启用）
+  # tls:
+  #   cert: "/etc/ssl/cert.pem"
+  #   key: "/etc/ssl/key.pem"
+
+admin:
+  # 默认仅监听 127.0.0.1，避免管理面板暴露到公网。
+  # 若 password 为空，admin.listen 必须为 127.0.0.1/localhost，否则启动会被拒绝。
+  listen: "127.0.0.1:9090"
+  # 管理员密码。留空仅在 admin.listen 为本机时被允许。
+  password: ""
+  # JWT 签名密钥。必须设置且长度 >= 16。禁止使用占位字符串。
+  jwt_secret: ""
+  # token 过期时间
+  jwt_expire: "24h"
+  # 登录失败速率限制：login_window 内累计 login_max_failures 次失败后锁定 login_lockout。
+  login_max_failures: 5
+  login_window: "60s"
+  login_lockout: "5m"
+
+log:
+  level: "info"
+  file: ""  # 空则输出到 stdout

@@ -1,0 +1,32 @@
+.git
+.claude
+.DS_Store
+.env
+
+# Local binaries and generated output
+chijie
+proxygate
+gateway
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Local secrets and runtime configs
+configs/*.yaml
+!configs/*.yaml.example
+
+# Frontend/generated assets
+web/node_modules/
+web/dist/
+internal/admin/dist/
+
+# Local editor and logs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.log

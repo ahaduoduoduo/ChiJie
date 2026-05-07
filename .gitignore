@@ -1,0 +1,45 @@
+# Binaries
+chijie
+proxygate
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Frontend
+web/node_modules/
+web/dist/
+internal/admin/dist/
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local Docker environment
+.env
+
+# Local configs (use *.example as templates and copy to actual filenames)
+configs/gateway.yaml
+configs/nodes.yaml
+configs/fingerprints.yaml
+.cursor-input-socket

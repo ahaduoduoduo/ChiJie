@@ -1,0 +1,34 @@
+node_pools:
+    # 模板池示例：Bright Data 类按地区动态生成账号
+    brightdata-example:
+        source: template
+        enabled: true
+        type: http_proxy
+        server: brd.superproxy.io
+        port: 33335
+        username_template: brd-customer-hl_xxxxxxxx-zone-yyy-country-{region}
+        password: REPLACE_WITH_YOUR_PASSWORD
+
+    # 直连池
+    direct:
+        source: direct
+
+    # 静态节点池示例
+    static-example:
+        source: static
+        nodes:
+            - name: hk-socks5-1
+              type: socks5
+              server: example.com
+              port: 1080
+              region: HK
+              username: REPLACE_WITH_USERNAME
+              password: REPLACE_WITH_PASSWORD
+
+    # 订阅池示例
+    subscription-example:
+        source: subscription
+        url: https://your-subscription-host/path?token=REPLACE_WITH_TOKEN
+        update_interval: 1h
+        reject_regex:
+            - 剩余流量|套餐
