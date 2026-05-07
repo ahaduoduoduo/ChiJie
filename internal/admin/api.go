@@ -885,6 +885,8 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		nodesPath := filepath.Join(s.configDir, "nodes.yaml")
 		if err := s.poolManager.LoadFromFile(nodesPath); err != nil {
 			errors = append(errors, "nodes: "+err.Error())
+		} else {
+			s.poolManager.StartSubscriptionUpdater()
 		}
 	}
 
@@ -1197,6 +1199,7 @@ func (s *Server) saveAndReloadNodes(path string, config *pool.NodesFileConfig) e
 	if err := s.poolManager.LoadFromFile(path); err != nil {
 		return fmt.Errorf("failed to reload nodes: %w", err)
 	}
+	s.poolManager.StartSubscriptionUpdater()
 	return nil
 }
 

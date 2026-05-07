@@ -221,3 +221,11 @@
 - [x] `.env.example` 新增 `CHIJIE_IMAGE`，默认指向 `ahaduoduoduo/chijie:latest`
 - [x] Docker 默认宿主机端口改为 `127.0.0.1:18080` 和 `127.0.0.1:19090`，便于 nginx 反向代理
 - [x] 新增 `docs/dockerhub-release.md`，说明 Docker Hub 仓库、GitHub Secrets 和 VPS 更新命令
+
+## P18 — 订阅源编辑补齐 ✅
+日期：2026-05-07
+
+- [x] Subscriptions 编辑抽屉新增 Source 页签，支持修改订阅 URL、刷新间隔和家宽标识
+- [x] Subscriptions 编辑抽屉新增删除订阅池入口
+- [x] 保存或删除节点池后重启订阅自动刷新协程，避免旧 interval 或已删除订阅继续执行
+- [x] 订阅拉取使用指定 Chrome User-Agent，并保留 fetch 底层错误原因且不暴露 URL query token

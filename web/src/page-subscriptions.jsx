@@ -93,13 +93,32 @@ function PageSubscriptions({ state, dispatch }) {
 }
 
 function SubEditor({ sub, dispatch, onClose, toast }) {
-  const [tab, setTab] = React.useState("regions");
-  const [regionDraft, setRegionDraft] = React.useState(() => Object.fromEntries((sub.nodes || []).map(n => [n.name, n.region || ""])));
-  const [tagDraft, setTagDraft] = React.useState(() => Object.fromEntries((sub.nodes || []).map(n => [n.name, (n.tags || []).join(", ")])));
+  const sourceForm = (pool) => ({
+    url: pool.url || "",
+    update_interval: pool.update_interval || "1h",
+    residential: !!pool.residential,
+  });
+  const regionsFromNodes = (nodes) => Object.fromEntries((nodes || []).map(n => [n.name, n.region || ""]));
+  const tagsFromNodes = (nodes) => Object.fromEntries((nodes || []).map(n => [n.name, (n.tags || []).join(", ")]));
+  const [tab, setTab] = React.useState("source");
+  const [source, setSource] = React.useState(() => sourceForm(sub));
+  const [regionDraft, setRegionDraft] = React.useState(() => regionsFromNodes(sub.nodes));
+  const [tagDraft, setTagDraft] = React.useState(() => tagsFromNodes(sub.nodes));
   const [aliasNode, setAliasNode] = React.useState(sub.nodes[0]?.name || "");
   const [alias, setAlias] = React.useState(sub.nodes[0]?.alias || "");
   const [reject, setReject] = React.useState((sub.reject_regex || []).join("\n"));
+  React.useEffect(() => {
+    setTab("source");
+    setSource(sourceForm(sub));
+    setRegionDraft(regionsFromNodes(sub.nodes));
+    setTagDraft(tagsFromNodes(sub.nodes));
+    setAliasNode(sub.nodes[0]?.name || "");
+    setAlias(sub.nodes[0]?.alias || "");
+    setReject((sub.reject_regex || []).join("\n"));
+  }, [sub.name]);
+  const setSourceField = (key, value) => setSource(v => ({ ...v, [key]: value }));
   const tabs = [
+    {value:"source", label:"Source"},
     {value:"regions", label:"Region overrides"},
     {value:"aliases", label:"Aliases"},
     {value:"tags", label:"Tags"},
@@ -120,6 +139,35 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
             }}>{t.label}</button>
         ))}
       </div>
+      {tab === "source" && (
+        <div className="col gap-12">
+          <div className="field"><label className="field-label">Subscription URL(s)</label>
+            <textarea className="input mono" value={source.url} onChange={e => setSourceField("url", e.target.value)} style={{minHeight:120}} spellCheck="false"></textarea>
+            <div className="field-hint">Multiple URLs separated by newline, comma or |.</div></div>
+          <div className="field-row">
+            <div className="field"><label className="field-label">Refresh interval</label>
+              <input className="input mono" value={source.update_interval} onChange={e => setSourceField("update_interval", e.target.value)} placeholder="1h"/></div>
+            <div className="field"><label className="field-label">Class</label>
+              <Toggle on={source.residential} onChange={v => setSourceField("residential", v)} label="Residential pool"/></div>
+          </div>
+          <div className="row gap-12" style={{marginTop:4, flexWrap:"wrap"}}>
+            <button className="btn primary" onClick={async () => {
+              if (!source.url.trim()) { toast("Subscription URL is required"); return; }
+              const ok = await dispatch({type:"updatePoolConfig", pool: sub.name, patch:{
+                url: source.url.trim(),
+                update_interval: source.update_interval.trim(),
+                residential: source.residential,
+              }});
+              if (ok) onClose();
+            }}><Ic.check/> Save & fetch</button>
+            <button className="btn danger ml-auto" onClick={async () => {
+              if (!window.confirm(`Delete subscription pool "${sub.name}"?`)) return;
+              const ok = await dispatch({type:"deletePool", pool: sub.name});
+              if (ok) onClose();
+            }}><Ic.trash/> Delete subscription</button>
+          </div>
+        </div>
+      )}
       {tab === "regions" && (
         <div className="col gap-12">
           <div className="field-hint">Override auto-detected region codes for mis-tagged nodes.</div>
