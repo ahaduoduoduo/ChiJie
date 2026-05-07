@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -28,10 +29,28 @@ type SubscriptionParser struct {
 }
 
 const MaxSubscriptionBodyBytes = 4 * 1024 * 1024
+const subscriptionUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 
 func NewSubscriptionParser() *SubscriptionParser {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     false,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		TLSNextProto:          map[string]func(string, *tls.Conn) http.RoundTripper{},
+	}
+
 	return &SubscriptionParser{
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{
+			Timeout:   45 * time.Second,
+			Transport: transport,
+		},
 	}
 }
 
@@ -75,7 +94,7 @@ func (p *SubscriptionParser) fetchOne(subURL string) ([]dialer.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create subscription request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Chijie/1.0")
+	req.Header.Set("User-Agent", subscriptionUserAgent)
 	req.Header.Set("Accept", "text/plain, application/yaml, application/x-yaml, application/json, */*")
 	resp, err := p.client.Do(req)
 	if err != nil {

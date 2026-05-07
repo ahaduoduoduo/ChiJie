@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParsePlainURIListSupportsCommonProtocols(t *testing.T) {
@@ -182,7 +183,7 @@ func TestFetchNetworkErrorKeepsCauseAndRedactsURL(t *testing.T) {
 
 func TestFetchSendsSubscriptionHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("User-Agent"); !strings.Contains(got, "Chijie") {
+		if got := r.Header.Get("User-Agent"); got != subscriptionUserAgent {
 			t.Fatalf("unexpected user agent: %q", got)
 		}
 		if got := r.Header.Get("Accept"); !strings.Contains(got, "application/yaml") {
@@ -200,6 +201,26 @@ func TestFetchSendsSubscriptionHeaders(t *testing.T) {
 	}
 	if len(nodes) != 1 || nodes[0].Name != "headers" {
 		t.Fatalf("unexpected nodes: %#v", nodes)
+	}
+}
+
+func TestNewSubscriptionParserUsesConservativeHTTPTransport(t *testing.T) {
+	parser := NewSubscriptionParser()
+	if parser.client.Timeout != 45*time.Second {
+		t.Fatalf("unexpected client timeout: %s", parser.client.Timeout)
+	}
+	transport, ok := parser.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected http transport, got %T", parser.client.Transport)
+	}
+	if transport.ForceAttemptHTTP2 {
+		t.Fatalf("subscription transport should not force HTTP/2")
+	}
+	if transport.TLSNextProto == nil {
+		t.Fatalf("subscription transport should disable automatic HTTP/2")
+	}
+	if transport.ResponseHeaderTimeout != 30*time.Second {
+		t.Fatalf("unexpected response header timeout: %s", transport.ResponseHeaderTimeout)
 	}
 }
 
