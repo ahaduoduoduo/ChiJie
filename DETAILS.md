@@ -97,7 +97,7 @@ chijie/
 
 ### server（请求入口）
 
-接收 `POST /proxy` 请求，完成认证、JSON 解包、`egress` 参数解析、出口选择、TLS 指纹包装、目标请求执行、响应大小限制和流量记录。
+接收 `POST /proxy` 请求，完成认证、JSON 解包、`egress` 参数解析、出口候选排序、TLS 指纹包装、目标请求执行、出口失败重试、响应大小限制和流量记录。
 
 `ProxyRequest` 当前字段：
 

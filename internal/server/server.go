@@ -26,7 +26,22 @@ const MaxProxyBodyBytes = 10 * 1024 * 1024
 // MaxProxyResponseBytes 是 /proxy 单次上游响应允许读取的最大 body 大小。
 const MaxProxyResponseBytes = 32 * 1024 * 1024
 
+// MaxProxyAttempts 是一次 /proxy 请求在出口执行失败时允许尝试的最大出口数量。
+const MaxProxyAttempts = 2
+
 var errProxyResponseTooLarge = errors.New("upstream response body is too large")
+
+type proxyAttemptError struct {
+	err error
+}
+
+func (e *proxyAttemptError) Error() string {
+	return e.err.Error()
+}
+
+func (e *proxyAttemptError) Unwrap() error {
+	return e.err
+}
 
 // Server HTTP 服务器
 type Server struct {
@@ -67,6 +82,7 @@ type egressRoute struct {
 	TLSFingerprint string
 	MaxLatencyMS   int
 	Choice         *pool.EgressChoice
+	Choices        []*pool.EgressChoice
 }
 
 // Config 服务器配置
@@ -209,15 +225,15 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	util.Debugf("[egress] %s %s → group:%s strategy:%s residential:%t",
 		req.Method, req.URL, route.Group, route.Strategy, route.Residential)
 
-	respBody, contentType, statusCode, err := s.doProxy(r.Context(), &req, route)
+	respBody, contentType, statusCode, finalRoute, err := s.doProxyWithRetry(r.Context(), &req, route)
 	if err != nil {
 		util.Warnf("[egress] proxy failed: %v", err)
-		s.recordProxyTrace(&req, route, http.StatusBadGateway, requestBytes, 0, time.Since(requestStarted), err.Error())
+		s.recordProxyTrace(&req, finalRoute, http.StatusBadGateway, requestBytes, 0, time.Since(requestStarted), err.Error())
 		writeProxyError(w, http.StatusBadGateway, "proxy request failed", err.Error())
 		return
 	}
 
-	s.recordProxyTrace(&req, route, statusCode, requestBytes, int64(len(respBody)), time.Since(requestStarted), "")
+	s.recordProxyTrace(&req, finalRoute, statusCode, requestBytes, int64(len(respBody)), time.Since(requestStarted), "")
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
@@ -283,6 +299,83 @@ func traceTarget(rawURL string) string {
 	return parsed.Host + parsed.Path
 }
 
+func (s *Server) doProxyWithRetry(ctx context.Context, req *ProxyRequest, route *egressRoute) ([]byte, string, int, *egressRoute, error) {
+	attempts := proxyAttemptRoutes(route, MaxProxyAttempts)
+	var attemptErrors []string
+	var lastRoute *egressRoute
+	var lastErr error
+
+	for idx, attemptRoute := range attempts {
+		lastRoute = attemptRoute
+		respBody, contentType, statusCode, err := s.doProxy(ctx, req, attemptRoute)
+		if err == nil {
+			return respBody, contentType, statusCode, attemptRoute, nil
+		}
+		lastErr = err
+		attemptErrors = append(attemptErrors, fmt.Sprintf("%s: %v", routeAttemptName(attemptRoute), err))
+		if idx+1 >= len(attempts) || !isRetryableProxyAttempt(ctx, err) {
+			break
+		}
+		util.Warnf("[egress] attempt via %s failed, retrying next candidate: %v", routeAttemptName(attemptRoute), err)
+	}
+
+	if len(attemptErrors) > 1 {
+		return nil, "", 0, lastRoute, errors.New(strings.Join(attemptErrors, "; "))
+	}
+	if lastErr != nil {
+		return nil, "", 0, lastRoute, lastErr
+	}
+	return nil, "", 0, lastRoute, fmt.Errorf("proxy request failed")
+}
+
+func proxyAttemptRoutes(route *egressRoute, maxAttempts int) []*egressRoute {
+	if route == nil {
+		return nil
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	if len(route.Choices) == 0 {
+		return []*egressRoute{route}
+	}
+	limit := len(route.Choices)
+	if limit > maxAttempts {
+		limit = maxAttempts
+	}
+	routes := make([]*egressRoute, 0, limit)
+	for _, choice := range route.Choices[:limit] {
+		attemptRoute := *route
+		attemptRoute.Choice = choice
+		attemptRoute.Region = choice.Region
+		attemptRoute.Group = choice.Group
+		routes = append(routes, &attemptRoute)
+	}
+	return routes
+}
+
+func routeAttemptName(route *egressRoute) string {
+	if route == nil {
+		return "unknown"
+	}
+	if route.Choice != nil {
+		if route.Choice.NodeName != "" {
+			return route.Choice.NodeName
+		}
+		if route.Choice.PoolName != "" {
+			return route.Choice.PoolName
+		}
+	}
+	return route.Group
+}
+
+func isRetryableProxyAttempt(ctx context.Context, err error) bool {
+	if ctx != nil && ctx.Err() != nil {
+		return false
+	}
+	var attemptErr *proxyAttemptError
+	return errors.As(err, &attemptErr)
+}
+
 func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRoute) ([]byte, string, int, error) {
 	d, err := s.getDialer(route)
 	if err != nil {
@@ -333,7 +426,7 @@ func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRo
 			resp, err := client.Do(httpReq)
 			elapsed := time.Since(startTime)
 			if err != nil {
-				return nil, "", 0, fmt.Errorf("do request via %s: %w", d.Name(), err)
+				return nil, "", 0, &proxyAttemptError{err: fmt.Errorf("do request via %s: %w", d.Name(), err)}
 			}
 			defer resp.Body.Close()
 
@@ -360,7 +453,7 @@ func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRo
 	resp, err := client.Do(httpReq)
 	elapsed := time.Since(startTime)
 	if err != nil {
-		return nil, "", 0, fmt.Errorf("do request via %s: %w", d.Name(), err)
+		return nil, "", 0, &proxyAttemptError{err: fmt.Errorf("do request via %s: %w", d.Name(), err)}
 	}
 	defer resp.Body.Close()
 
@@ -444,10 +537,11 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 
 	if region == "" {
 		if options.Any {
-			choice, err := s.poolManager.SelectAnyEgress(strategy, options.Residential, time.Duration(maxLatencyMS)*time.Millisecond)
+			choices, err := s.poolManager.SelectAnyEgressCandidates(strategy, options.Residential, time.Duration(maxLatencyMS)*time.Millisecond)
 			if err != nil {
 				return nil, err
 			}
+			choice := choices[0]
 			return &egressRoute{
 				Any:            true,
 				Region:         choice.Region,
@@ -457,6 +551,7 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 				TLSFingerprint: fingerprintValue,
 				MaxLatencyMS:   maxLatencyMS,
 				Choice:         choice,
+				Choices:        choices,
 			}, nil
 		}
 		return &egressRoute{
@@ -468,10 +563,11 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 	}
 
 	if isAnyRegion(region) {
-		choice, err := s.poolManager.SelectAnyEgress(strategy, options.Residential, time.Duration(maxLatencyMS)*time.Millisecond)
+		choices, err := s.poolManager.SelectAnyEgressCandidates(strategy, options.Residential, time.Duration(maxLatencyMS)*time.Millisecond)
 		if err != nil {
 			return nil, err
 		}
+		choice := choices[0]
 		return &egressRoute{
 			Any:            true,
 			Region:         choice.Region,
@@ -481,6 +577,7 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 			TLSFingerprint: fingerprintValue,
 			MaxLatencyMS:   maxLatencyMS,
 			Choice:         choice,
+			Choices:        choices,
 		}, nil
 	}
 
@@ -489,10 +586,11 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 		return nil, errInvalidRegion
 	}
 
-	choice, err := s.poolManager.SelectEgress(region, strategy, options.Residential)
+	choices, err := s.poolManager.SelectEgressCandidates(region, strategy, options.Residential)
 	if err != nil {
 		return nil, err
 	}
+	choice := choices[0]
 
 	return &egressRoute{
 		Region:         region,
@@ -501,6 +599,7 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 		Residential:    options.Residential,
 		TLSFingerprint: fingerprintValue,
 		Choice:         choice,
+		Choices:        choices,
 	}, nil
 }
 

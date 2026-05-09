@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +15,27 @@ import (
 
 	"chijie/internal/pool"
 )
+
+type testDialer struct {
+	name string
+	dial func(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
+func (d *testDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return d.dial(ctx, network, addr)
+}
+
+func (d *testDialer) GetHTTPTransport() *http.Transport {
+	return &http.Transport{
+		DialContext:           d.DialContext,
+		ForceAttemptHTTP2:     false,
+		ResponseHeaderTimeout: 5 * time.Second,
+	}
+}
+
+func (d *testDialer) Name() string {
+	return d.name
+}
 
 func TestResolveEgressUsesTemplateWhenRegionGroupMissing(t *testing.T) {
 	dir := t.TempDir()
@@ -133,6 +157,103 @@ node_pools:
 	}
 	if !route.Any || route.Group != "ANY" || route.Choice == nil || route.Choice.NodeName != "us-node" {
 		t.Fatalf("unexpected wildcard route: %#v", route)
+	}
+}
+
+func TestDoProxyWithRetryUsesNextCandidateOnTransportError(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer target.Close()
+
+	var firstAttempts int
+	first := &testDialer{
+		name: "first",
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			firstAttempts++
+			return nil, errors.New("simulated EOF")
+		},
+	}
+	second := &testDialer{
+		name: "second",
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+	}
+	route := &egressRoute{
+		Region:   "US",
+		Group:    "US",
+		Strategy: "least-latency",
+		Choices: []*pool.EgressChoice{
+			{Dialer: first, PoolName: "pool", NodeName: "first", Source: "static", Region: "US", Group: "US"},
+			{Dialer: second, PoolName: "pool", NodeName: "second", Source: "static", Region: "US", Group: "US"},
+		},
+	}
+
+	respBody, contentType, statusCode, finalRoute, err := (&Server{}).doProxyWithRetry(context.Background(), &ProxyRequest{
+		URL:    target.URL,
+		Method: http.MethodGet,
+	}, route)
+	if err != nil {
+		t.Fatalf("proxy with retry: %v", err)
+	}
+	if string(respBody) != "ok" || statusCode != http.StatusOK || contentType != "text/plain" {
+		t.Fatalf("unexpected response: body=%q status=%d contentType=%q", respBody, statusCode, contentType)
+	}
+	if finalRoute == nil || finalRoute.Choice == nil || finalRoute.Choice.NodeName != "second" {
+		t.Fatalf("expected second candidate, got %#v", finalRoute)
+	}
+	if firstAttempts != 1 {
+		t.Fatalf("first candidate attempts: got %d want 1", firstAttempts)
+	}
+}
+
+func TestDoProxyWithRetryDoesNotRetryResponseStatus(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer target.Close()
+
+	var secondAttempts int
+	direct := &testDialer{
+		name: "direct",
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+	}
+	unused := &testDialer{
+		name: "unused",
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			secondAttempts++
+			return nil, errors.New("should not be called")
+		},
+	}
+	route := &egressRoute{
+		Region:   "US",
+		Group:    "US",
+		Strategy: "least-latency",
+		Choices: []*pool.EgressChoice{
+			{Dialer: direct, PoolName: "pool", NodeName: "direct", Source: "static", Region: "US", Group: "US"},
+			{Dialer: unused, PoolName: "pool", NodeName: "unused", Source: "static", Region: "US", Group: "US"},
+		},
+	}
+
+	_, _, statusCode, finalRoute, err := (&Server{}).doProxyWithRetry(context.Background(), &ProxyRequest{
+		URL:    target.URL,
+		Method: http.MethodGet,
+	}, route)
+	if err != nil {
+		t.Fatalf("proxy should return upstream response without retry error: %v", err)
+	}
+	if statusCode != http.StatusForbidden {
+		t.Fatalf("status: got %d want %d", statusCode, http.StatusForbidden)
+	}
+	if finalRoute == nil || finalRoute.Choice == nil || finalRoute.Choice.NodeName != "direct" {
+		t.Fatalf("expected first candidate, got %#v", finalRoute)
+	}
+	if secondAttempts != 0 {
+		t.Fatalf("second candidate should not be called, got %d attempts", secondAttempts)
 	}
 }
 

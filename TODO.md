@@ -254,3 +254,11 @@
 - [x] Overview `Recent errors` 的错误筛选改为与 Traffic 页一致，覆盖 `status >= 400`、`status == 0` 和有错误 detail 的请求
 - [x] Overview `Recent errors` 在目标站点返回 4xx 且无后端错误 detail 时显示目标 URL
 - [x] Overview 新增 `Recent success`，展示最近 5 条成功请求
+
+## P22 — 出口执行失败自动换节点重试 ✅
+日期：2026-05-09
+
+- [x] `pool.Manager` 新增按策略排序的出口候选列表，`least-latency` 按延迟升序，`round-robin` 从当前轮询节点开始，`random` 返回随机顺序
+- [x] `/proxy` 在非直连出口建立连接或等待响应头失败时最多重试一次，第二次使用下一个候选出口
+- [x] 源站已经返回 HTTP 状态码时不重试，避免把真实 `403` / `404` / `502` 误判为代理失败
+- [x] 补充出口候选排序和代理失败重试的单元测试

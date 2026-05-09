@@ -235,6 +235,67 @@ func TestSelectEgressRoundRobinAcrossPools(t *testing.T) {
 	}
 }
 
+func TestSelectEgressCandidatesLeastLatencyOrder(t *testing.T) {
+	manager := NewManager()
+	pool, err := manager.buildPool("static", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "us-slow", Type: "direct", Region: "US"},
+			{Name: "us-fast", Type: "direct", Region: "US"},
+			{Name: "us-unknown", Type: "direct", Region: "US"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	pool.Entries[0].Latency = 80 * time.Millisecond
+	pool.Entries[1].Latency = 20 * time.Millisecond
+	manager.pools["static"] = pool
+
+	choices, err := manager.SelectEgressCandidates("US", "least-latency", false)
+	if err != nil {
+		t.Fatalf("select candidates: %v", err)
+	}
+	got := []string{choices[0].NodeName, choices[1].NodeName, choices[2].NodeName}
+	want := []string{"us-fast", "us-slow", "us-unknown"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidate order: got %v want %v", got, want)
+		}
+	}
+}
+
+func TestSelectEgressCandidatesRoundRobinStartsAtNextNode(t *testing.T) {
+	manager := NewManager()
+	pool, err := manager.buildPool("static", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "us-a", Type: "direct", Region: "US"},
+			{Name: "us-b", Type: "direct", Region: "US"},
+			{Name: "us-c", Type: "direct", Region: "US"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	manager.pools["static"] = pool
+
+	first, err := manager.SelectEgressCandidates("US", "round-robin", false)
+	if err != nil {
+		t.Fatalf("select first candidates: %v", err)
+	}
+	second, err := manager.SelectEgressCandidates("US", "round-robin", false)
+	if err != nil {
+		t.Fatalf("select second candidates: %v", err)
+	}
+	if first[0].NodeName != "us-a" || first[1].NodeName != "us-b" {
+		t.Fatalf("unexpected first order: %#v", first)
+	}
+	if second[0].NodeName != "us-b" || second[1].NodeName != "us-c" {
+		t.Fatalf("unexpected second order: %#v", second)
+	}
+}
+
 func TestSelectEgressUsesTemplateForColdRegion(t *testing.T) {
 	manager := NewManager()
 	template, err := manager.buildPool("brightdata", &PoolConfig{

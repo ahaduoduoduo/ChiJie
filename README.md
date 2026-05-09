@@ -159,6 +159,8 @@ Content-Type: application/json
 
 响应使用目标服务器的 status code、`Content-Type` 和响应体。
 
+如果选中的非直连出口在建立连接或等待响应头阶段失败（例如 `EOF`、拨号失败、代理断流、TLS 握手失败），`/proxy` 会按当前策略再换一个候选出口重试一次。目标站点已经返回 HTTP 状态码时不会重试，例如真实的 `403`、`404`、`502` 会原样返回给调用方。
+
 ### 出口选择
 
 1. `region` 为空且 `any` 不是 `true` 时使用直连出口；如果传入 `tls_fingerprint`，仍应用 TLS 指纹。

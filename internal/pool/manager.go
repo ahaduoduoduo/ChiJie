@@ -214,17 +214,26 @@ func (m *Manager) buildPool(name string, cfg *PoolConfig) (*Pool, error) {
 
 // SelectEgress 按地区、策略和家宽要求选择出口。普通节点优先，模板节点作为兜底。
 func (m *Manager) SelectEgress(region string, strategy string, residential bool) (*EgressChoice, error) {
+	choices, err := m.SelectEgressCandidates(region, strategy, residential)
+	if err != nil {
+		return nil, err
+	}
+	return choices[0], nil
+}
+
+// SelectEgressCandidates 返回按策略排序后的出口候选。普通节点优先，模板节点仅在普通节点为空时作为兜底。
+func (m *Manager) SelectEgressCandidates(region string, strategy string, residential bool) ([]*EgressChoice, error) {
 	region = NormalizeRegionCode(region)
 	if region == "" {
 		return nil, fmt.Errorf("region must be a two-letter region code")
 	}
 	strategy = NormalizeStrategy(strategy)
 
-	if choice := m.pickEgressChoice(m.entryChoices(region, residential), strategy, EgressGroup(region, residential)); choice != nil {
-		return choice, nil
+	if choices := m.orderEgressChoices(m.entryChoices(region, residential), strategy, EgressGroup(region, residential)); len(choices) > 0 {
+		return choices, nil
 	}
-	if choice := m.pickEgressChoice(m.templateChoices(region, residential), strategy, EgressGroup(region, residential)+":template"); choice != nil {
-		return choice, nil
+	if choices := m.orderEgressChoices(m.templateChoices(region, residential), strategy, EgressGroup(region, residential)+":template"); len(choices) > 0 {
+		return choices, nil
 	}
 
 	if residential {
@@ -235,11 +244,19 @@ func (m *Manager) SelectEgress(region string, strategy string, residential bool)
 
 // SelectAnyEgress 在不指定地区时选择一个非直连出口。maxLatency 为 0 时不限制延迟。
 func (m *Manager) SelectAnyEgress(strategy string, residential bool, maxLatency time.Duration) (*EgressChoice, error) {
+	choices, err := m.SelectAnyEgressCandidates(strategy, residential, maxLatency)
+	if err != nil {
+		return nil, err
+	}
+	return choices[0], nil
+}
+
+// SelectAnyEgressCandidates 在不指定地区时返回按策略排序后的非直连候选。maxLatency 为 0 时不限制延迟。
+func (m *Manager) SelectAnyEgressCandidates(strategy string, residential bool, maxLatency time.Duration) ([]*EgressChoice, error) {
 	strategy = NormalizeStrategy(strategy)
 	group := AnyEgressGroup(residential)
-	choices := m.anyEntryChoices(residential, maxLatency)
-	if choice := m.pickEgressChoice(choices, strategy, group); choice != nil {
-		return choice, nil
+	if choices := m.orderEgressChoices(m.anyEntryChoices(residential, maxLatency), strategy, group); len(choices) > 0 {
+		return choices, nil
 	}
 
 	if maxLatency > 0 {
@@ -403,28 +420,50 @@ func templateUsername(usernameTemplate string, region string) string {
 }
 
 func (m *Manager) pickEgressChoice(choices []*EgressChoice, strategy string, rrKey string) *EgressChoice {
+	ordered := m.orderEgressChoices(choices, strategy, rrKey)
+	if len(ordered) == 0 {
+		return nil
+	}
+	return ordered[0]
+}
+
+func (m *Manager) orderEgressChoices(choices []*EgressChoice, strategy string, rrKey string) []*EgressChoice {
 	if len(choices) == 0 {
 		return nil
 	}
+	ordered := append([]*EgressChoice(nil), choices...)
 
 	switch NormalizeStrategy(strategy) {
 	case "round-robin":
 		m.rrMu.Lock()
-		idx := m.rrByGroup[rrKey] % len(choices)
+		idx := m.rrByGroup[rrKey] % len(ordered)
 		m.rrByGroup[rrKey]++
 		m.rrMu.Unlock()
-		return choices[idx]
-	case "least-latency":
-		best := choices[0]
-		for _, choice := range choices[1:] {
-			if choice.Latency > 0 && (best.Latency == 0 || choice.Latency < best.Latency) {
-				best = choice
-			}
+		if idx > 0 {
+			ordered = append(ordered[idx:], ordered[:idx]...)
 		}
-		return best
+	case "least-latency":
+		sort.SliceStable(ordered, func(i, j int) bool {
+			if ordered[i].Latency == ordered[j].Latency {
+				if ordered[i].PoolName == ordered[j].PoolName {
+					return ordered[i].NodeName < ordered[j].NodeName
+				}
+				return ordered[i].PoolName < ordered[j].PoolName
+			}
+			if ordered[i].Latency == 0 {
+				return false
+			}
+			if ordered[j].Latency == 0 {
+				return true
+			}
+			return ordered[i].Latency < ordered[j].Latency
+		})
 	default:
-		return choices[rand.Intn(len(choices))]
+		rand.Shuffle(len(ordered), func(i, j int) {
+			ordered[i], ordered[j] = ordered[j], ordered[i]
+		})
 	}
+	return ordered
 }
 
 // GetPool 获取指定池

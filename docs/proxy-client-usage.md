@@ -2,6 +2,8 @@
 
 日期：2026-05-07
 
+更新：2026-05-09
+
 本文面向接入 Chijie 的业务服务、脚本、Cloudflare Workers 或 AI Agent。调用方不需要访问 Admin API，只需要拿到 `Proxy API` 地址和一个 `proxy_token`。
 
 ## 接入信息
@@ -13,7 +15,7 @@ CHIJIE_BASE_URL="https://proxy.example.com"
 CHIJIE_PROXY_TOKEN="eyJ..."
 ```
 
-`CHIJIE_BASE_URL` 指向 Proxy API
+`CHIJIE_BASE_URL` 指向 Proxy API，不是 Admin 管理后台。
 
 所有代理请求都使用 Bearer token：
 
@@ -122,6 +124,16 @@ Content-Type: application/json
 | `403` | `unauthorized` | token 缺失、错误或过期 |
 | `405` | `method not allowed` | `/proxy` 只接受 `POST` |
 | `502` | `proxy request failed` | 已选择出口，但目标请求失败 |
+
+### 出口失败自动重试
+
+`/proxy` 在非直连出口执行失败时最多尝试两个候选出口。第一次尝试如果在建立连接或等待响应头阶段失败，例如 `EOF`、拨号失败、代理断流、TLS 握手失败，Chijie 会按当前 `strategy` 换下一个候选出口再请求一次。
+
+- `least-latency`：第一次使用最低延迟候选，失败后使用下一个延迟候选。
+- `random`：第一次随机选中一个候选，失败后使用另一个随机候选。
+- `round-robin`：第一次使用当前轮询候选，失败后使用下一个候选。
+
+目标站点已经返回 HTTP 状态码时不会重试，例如真实的 `403`、`404`、`502` 会原样返回给调用方。非幂等请求（例如会创建订单的 `POST`）如果第一次请求已经到达源站但连接中途断开，重试可能让源站收到第二次请求；调用方应使用业务幂等键控制重复提交风险。
 
 ### 调用示例：直连请求
 
