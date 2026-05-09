@@ -2,7 +2,7 @@
 
 日期：2026-05-04
 
-更新：2026-05-06
+更新：2026-05-09
 
 `web/` 目录是当前 Admin 控制台原型源码。页面使用 React UMD 与 Babel standalone，以静态文件方式运行；`npm run build` 不做打包压缩，只复制 `index.html` 和 `src/` 到 `web/dist`，再由根目录 `build.sh` 复制到 `internal/admin/dist` 供 Go `embed` 打包。
 
@@ -26,7 +26,7 @@
 - 后端 `PoolStatus.config` 会展开为页面所需的池字段。
 - 后端节点名会转换成稳定 `id`：`<pool>:<node>`。
 - Go duration 字符串会转换成毫秒数用于延迟展示。
-- 后端 `traffic.Trace` 会转换成 Traffic 页使用的 request 行。
+- 后端 `traffic.Trace` 会转换成 Traffic 和 Overview 近期请求列表共用的 request 行。
 
 ## 已接入交互
 
@@ -34,7 +34,8 @@
 - Subscriptions：订阅池新增、刷新、启停、节点地区修正、别名、标签、`reject_regex` 保存。
 - Templates：模板池新增、编辑、启停、删除、按地区真实探测。
 - TLS Profiles：指纹新增、JSON/YAML 配置输入、删除、真实 HTTPS 指纹测试。
-- Traffic：真实请求日志展示、CSV 导出。
+- Overview：最近成功和最近错误请求可打开与 Traffic 一致的请求详情抽屉，详情时间按 UTC+8 展示。
+- Traffic：真实请求日志展示、详情抽屉、CSV 导出。
 - System：运行统计展示、Proxy token 生成、配置重载、日志级别保存、当前配置导出。
 
 ## 接口边界

@@ -1,5 +1,5 @@
 // Traffic — request log + drawer
-const { Drawer, Seg, RegionPill, StatusCode, fmtBytes, fmtAgo, BarChart, Sparkline } = window.UI;
+const { Drawer, Seg, RegionPill, StatusCode, RequestDetailContent, fmtBytes, fmtAgo, BarChart, Sparkline } = window.UI;
 
 function PageTraffic({ state }) {
   const { traffic } = state;
@@ -116,42 +116,7 @@ function PageTraffic({ state }) {
       </div>
 
       <Drawer open={!!open} onClose={() => setOpen(null)} title="Request detail">
-        {open && (
-          <>
-            <div className="row" style={{gap:8, flexWrap:"wrap", marginBottom:24}}>
-              <span className="pill mono"><StatusCode code={open.status}/></span>
-              <span className="pill mono">{open.method}</span>
-              {open.type === "tunnel" && <span className="pill res">WS tunnel</span>}
-              <RegionPill code={open.group} residential={open.residential}/>
-              {open.template && <span className="pill mono">template</span>}
-            </div>
-            <div className="kv" style={{rowGap:14}}>
-              <div className="k">URL</div><div className="v mono" style={{wordBreak:"break-all", fontSize:11.5, lineHeight:1.5}}>{open.url}</div>
-              <div className="k">Strategy</div><div className="v mono">{open.strategy}</div>
-              <div className="k">Pool</div><div className="v mono">{open.pool}</div>
-              <div className="k">Node</div><div className="v mono" style={{fontSize:11.5}}>{open.node}</div>
-              <div className="k">TLS</div><div className="v mono">{open.tls || "default"}</div>
-              <div className="k">Duration</div><div className="v mono">{open.duration_ms} ms</div>
-              <div className="k">Bytes</div><div className="v mono">{fmtBytes(open.bytes)}</div>
-              {open.error && <><div className="k">Error</div><div className="v mono" style={{fontSize:11.5}}>{open.error}</div></>}
-            </div>
-            <div className="sep-h"/>
-            <div className="muted-2" style={{fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10, fontWeight:500}}>Replay payload</div>
-            <pre className="mono" style={{margin:0, padding:14, background:"var(--bg-2)", border:"1px solid var(--line-2)", borderRadius:6, fontSize:11.5, overflow:"auto", lineHeight:1.55, color:"var(--fg-1)"}}>{`POST /proxy
-Authorization: Bearer <proxy_token>
-
-{
-  "url": "${open.url}",
-  "method": "${open.method}",
-  "egress": {
-    "region": "${open.region}",
-    "strategy": "${open.strategy}",
-    "residential": ${open.residential},
-    "tls_fingerprint": "${open.tls}"
-  }
-}`}</pre>
-          </>
-        )}
+        <RequestDetailContent request={open}/>
       </Drawer>
     </div>
   );

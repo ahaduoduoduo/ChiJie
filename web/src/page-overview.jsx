@@ -1,5 +1,5 @@
 // Overview — minimal, focused on what matters at a glance
-const { Sparkline, BarChart, fmtAgo, StatusCode, RegionPill } = window.UI;
+const { Drawer, RequestDetailContent, Sparkline, BarChart, fmtAgo, StatusCode, RegionPill } = window.UI;
 
 function isTrafficSuccess(row) {
   return row.status > 0 && row.status < 400 && !row.error;
@@ -9,7 +9,7 @@ function isTrafficError(row) {
   return row.status === 0 || row.status >= 400 || !!row.error;
 }
 
-function RecentTrafficCard({ title, rows, empty, detail }) {
+function RecentTrafficCard({ title, rows, empty, detail, onSelect }) {
   return (
     <div className="card card-pad-0" style={{marginBottom: 20}}>
       <div className="card-h bordered"><h3>{title}</h3><span className="sub">{rows.length} in window</span></div>
@@ -18,7 +18,7 @@ function RecentTrafficCard({ title, rows, empty, detail }) {
         : <table className="table">
             <thead><tr><th>Time</th><th>Region</th><th>Pool</th><th>Status</th><th>Detail</th></tr></thead>
             <tbody>{rows.map(r => (
-              <tr key={r.id}>
+              <tr key={r.id} onClick={() => onSelect?.(r)} style={{cursor: onSelect ? "pointer" : "default"}}>
                 <td className="mono muted-2">{fmtAgo(r.ts)} ago</td>
                 <td><RegionPill code={r.group} residential={r.residential}/></td>
                 <td className="mono">{r.pool}</td>
@@ -33,6 +33,7 @@ function RecentTrafficCard({ title, rows, empty, detail }) {
 
 function PageOverview({ state }) {
   const { pools, traffic, regionGroups, stats } = state;
+  const [open, setOpen] = React.useState(null);
   const totalNodes = pools.flatMap(p => p.nodes || []).length;
   const onlineNodes = pools.flatMap(p => p.nodes || []).filter(n => n.alive && n.enabled).length;
   const recent = traffic.requests;
@@ -112,6 +113,7 @@ function PageOverview({ state }) {
         rows={successes}
         empty="No successful requests in the current window."
         detail={r => r.url || r.node || "—"}
+        onSelect={setOpen}
       />
 
       <RecentTrafficCard
@@ -119,7 +121,12 @@ function PageOverview({ state }) {
         rows={errs}
         empty="No errors. Egress is clean."
         detail={r => r.error || r.url || r.node || "—"}
+        onSelect={setOpen}
       />
+
+      <Drawer open={!!open} onClose={() => setOpen(null)} title="Request detail">
+        <RequestDetailContent request={open}/>
+      </Drawer>
     </div>
   );
 }

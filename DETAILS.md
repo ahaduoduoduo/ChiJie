@@ -49,9 +49,9 @@ chijie/
 │   │   ├── app.jsx              # 前端入口：登录、后端数据加载、页面切换、统一动作分发
 │   │   ├── api.jsx              # Admin API 客户端：JWT、请求错误、字段转换、节点/订阅/TLS/流量接口
 │   │   ├── data.jsx             # 地区名称、旗帜、地区组和模拟数据辅助函数
-│   │   ├── ui.jsx               # 共享 UI：弹窗、抽屉、开关、分段控件、图表、Toast
+│   │   ├── ui.jsx               # 共享 UI：弹窗、抽屉、请求详情、开关、分段控件、图表、Toast
 │   │   ├── icons.jsx            # 控制台图标
-│   │   ├── page-overview.jsx    # Overview：运行状态、节点在线数、成功率、地区组、最近成功和错误请求
+│   │   ├── page-overview.jsx    # Overview：运行状态、节点在线数、成功率、地区组、最近成功和错误请求及详情抽屉
 │   │   ├── page-egress.jsx      # Egress：地区组、节点表、节点启停、测试、静态节点新增/删除
 │   │   ├── page-subscriptions.jsx # Subscriptions：订阅新增、刷新、启停、元数据、reject_regex 保存和窄屏订阅卡片布局
 │   │   ├── page-templates.jsx   # Templates：模板池新增、启停、删除和用户名模板预览

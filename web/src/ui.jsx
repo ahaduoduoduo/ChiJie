@@ -165,10 +165,57 @@ function fmtAgo(ts) {
   if (sec < 3600) return `${Math.round(sec/60)}m`;
   return `${Math.round(sec/3600)}h`;
 }
+function fmtUTC8(ts) {
+  const d = new Date(Number(ts || Date.now()) + 8 * 60 * 60 * 1000);
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC+8`;
+}
 // Status code rendered tonally — no color, only weight
 function StatusCode({ code }) {
   const ok = code >= 200 && code < 400;
   return <span className="mono" style={{color: ok ? "var(--fg-0)" : "var(--fg-2)", fontWeight: ok ? 500 : 400}}>{code || "ERR"}</span>;
 }
 
-window.UI = { ToastProvider, useToast, Modal, Drawer, Toggle, Seg, RegionPill, StatusDot, LatencyBar, Sparkline, BarChart, fmtBytes, fmtAgo, StatusCode };
+function RequestDetailContent({ request }) {
+  if (!request) return null;
+  const replayRegion = request.region || (request.group || "").replace(/-RES$/, "");
+  return (
+    <>
+      <div className="row" style={{gap:8, flexWrap:"wrap", marginBottom:24}}>
+        <span className="pill mono"><StatusCode code={request.status}/></span>
+        <span className="pill mono">{request.method}</span>
+        {request.type === "tunnel" && <span className="pill res">WS tunnel</span>}
+        <RegionPill code={request.group} residential={request.residential}/>
+        {request.template && <span className="pill mono">template</span>}
+      </div>
+      <div className="kv" style={{rowGap:14}}>
+        <div className="k">Time</div><div className="v mono">{fmtUTC8(request.ts)}</div>
+        <div className="k">URL</div><div className="v mono" style={{wordBreak:"break-all", fontSize:11.5, lineHeight:1.5}}>{request.url}</div>
+        <div className="k">Strategy</div><div className="v mono">{request.strategy}</div>
+        <div className="k">Pool</div><div className="v mono">{request.pool}</div>
+        <div className="k">Node</div><div className="v mono" style={{fontSize:11.5}}>{request.node}</div>
+        <div className="k">TLS</div><div className="v mono">{request.tls || "default"}</div>
+        <div className="k">Duration</div><div className="v mono">{request.duration_ms} ms</div>
+        <div className="k">Bytes</div><div className="v mono">{fmtBytes(request.bytes)}</div>
+        {request.error && <><div className="k">Error</div><div className="v mono" style={{fontSize:11.5}}>{request.error}</div></>}
+      </div>
+      <div className="sep-h"/>
+      <div className="muted-2" style={{fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10, fontWeight:500}}>Replay payload</div>
+      <pre className="mono" style={{margin:0, padding:14, background:"var(--bg-2)", border:"1px solid var(--line-2)", borderRadius:6, fontSize:11.5, overflow:"auto", lineHeight:1.55, color:"var(--fg-1)"}}>{`POST /proxy
+Authorization: Bearer <proxy_token>
+
+{
+  "url": "${request.url}",
+  "method": "${request.method}",
+  "egress": {
+    "region": "${replayRegion}",
+    "strategy": "${request.strategy}",
+    "residential": ${request.residential},
+    "tls_fingerprint": "${request.tls}"
+  }
+}`}</pre>
+    </>
+  );
+}
+
+window.UI = { ToastProvider, useToast, Modal, Drawer, Toggle, Seg, RegionPill, StatusDot, LatencyBar, Sparkline, BarChart, fmtBytes, fmtAgo, fmtUTC8, StatusCode, RequestDetailContent };
