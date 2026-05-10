@@ -269,3 +269,10 @@
 - [x] Overview `Recent success` 和 `Recent errors` 行点击打开请求详情抽屉
 - [x] Traffic 和 Overview 共用同一个请求详情组件，避免两处详情展示不一致
 - [x] 请求详情抽屉新增 UTC+8 请求时间
+
+## P24 — Shadowsocks SIP002 订阅兼容 ✅
+日期：2026-05-10
+
+- [x] 兼容 Base64 包装的 CRLF 多行 URI 订阅
+- [x] 兼容 Shadowsocks `ss://userinfo@host:port/?plugin=...#name` 中 `host:port` 后的空路径 `/`
+- [x] 补充脱敏单元测试，覆盖 simple-obfs plugin 参数解析

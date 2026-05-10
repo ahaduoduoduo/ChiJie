@@ -24,7 +24,7 @@ chijie/
 │   │   └── logger.go            # 日志分级：Debugf / Infof / Warnf / Errorf，受 log.level 控制
 │   ├── pool/
 │   │   ├── manager.go           # 节点池：静态/模板/订阅/直连池管理、地区组、家宽组、出口选择
-│   │   ├── subscription.go      # 订阅解析：Base64 URI 列表、Clash YAML、纯 URI 列表、多订阅地址、URL 与响应大小限制
+│   │   ├── subscription.go      # 订阅解析：Base64 URI 列表、Clash YAML、纯 URI 列表、Shadowsocks SIP002、多订阅地址、URL 与响应大小限制
 │   │   └── health.go            # 健康检查：按池配置后台探测节点连通性和延迟
 │   ├── dialer/
 │   │   ├── dialer.go            # 统一 Dialer 接口定义、Node 结构、工厂方法

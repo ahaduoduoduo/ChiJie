@@ -457,13 +457,12 @@ func parseSSURI(uri string) (*dialer.Node, error) {
 		cipher = parts[0]
 		password = parts[1]
 
-		hostPort := uri[idx+1:]
-		host, portStr, err := net.SplitHostPort(hostPort)
+		host, parsedPort, err := parseSSHostPort(uri[idx+1:])
 		if err != nil {
 			return nil, fmt.Errorf("parse ss host:port: %w", err)
 		}
 		server = host
-		port, _ = strconv.Atoi(portStr)
+		port = parsedPort
 	} else {
 		// 格式: base64(method:password@server:port)
 		decoded, err := decodeBase64Flexible(uri)
@@ -481,12 +480,12 @@ func parseSSURI(uri string) (*dialer.Node, error) {
 		cipher = methodPass[0]
 		password = methodPass[1]
 
-		host, portStr, err := net.SplitHostPort(parts[1])
+		host, parsedPort, err := parseSSHostPort(parts[1])
 		if err != nil {
 			return nil, fmt.Errorf("parse ss host:port: %w", err)
 		}
 		server = host
-		port, _ = strconv.Atoi(portStr)
+		port = parsedPort
 	}
 
 	if name == "" {
@@ -502,6 +501,22 @@ func parseSSURI(uri string) (*dialer.Node, error) {
 		Extra:    map[string]string{"cipher": cipher},
 	}
 	return node, addSSQueryOptions(query, node)
+}
+
+func parseSSHostPort(value string) (string, int, error) {
+	value = strings.TrimSpace(value)
+	if idx := strings.Index(value, "/"); idx != -1 {
+		value = value[:idx]
+	}
+	host, portStr, err := net.SplitHostPort(value)
+	if err != nil {
+		return "", 0, err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", 0, err
+	}
+	return host, port, nil
 }
 
 func addSSQueryOptions(query url.Values, node *dialer.Node) error {

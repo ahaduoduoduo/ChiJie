@@ -144,6 +144,36 @@ func TestFetchSupportsMultipleSubscriptionURLs(t *testing.T) {
 	}
 }
 
+func TestFetchSupportsBase64SSURIListWithSIP002Path(t *testing.T) {
+	userInfo := base64.StdEncoding.EncodeToString([]byte("aes-128-gcm:pass"))
+	content := strings.Join([]string{
+		"ss://" + userInfo + "@hk.example.com:9527/?plugin=simple-obfs%3Bobfs%3Dhttp%3Bobfs-host%3Dedge.example.com#Hong%20Kong",
+		"ss://" + userInfo + "@jp.example.com:9527/?plugin=simple-obfs%3Bobfs%3Dhttp%3Bobfs-host%3Dedge.example.com#Japan",
+	}, "\r\n")
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(encoded))
+	}))
+	defer server.Close()
+
+	parser := NewSubscriptionParser()
+	parser.client = subscriptionTestClient(t, server)
+	nodes, err := parser.Fetch("http://example.com/sub")
+	if err != nil {
+		t.Fatalf("fetch subscription: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+	if nodes[0].Name != "Hong Kong" || nodes[0].Server != "hk.example.com" || nodes[0].Port != 9527 {
+		t.Fatalf("unexpected first node: %#v", nodes[0])
+	}
+	if nodes[0].Extra["plugin"] != "simple-obfs" || nodes[0].Extra["plugin_opts"] != "obfs=http;obfs-host=edge.example.com" {
+		t.Fatalf("ss plugin options not parsed: %#v", nodes[0].Extra)
+	}
+}
+
 func TestFetchReportsAllSubscriptionURLFailures(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
