@@ -294,7 +294,7 @@ func clashProxyToNode(proxy *ClashProxy) (*dialer.Node, error) {
 		node.Type = "ss"
 		node.Password = proxy.Password
 		node.Extra["cipher"] = proxy.Cipher
-		setExtra(node.Extra, "plugin", proxy.Plugin)
+		setExtra(node.Extra, "plugin", normalizeSSPlugin(proxy.Plugin))
 		setExtra(node.Extra, "plugin_opts", proxy.PluginOpts)
 
 	case "vmess":
@@ -523,12 +523,21 @@ func addSSQueryOptions(query url.Values, node *dialer.Node) error {
 	if plugin := query.Get("plugin"); plugin != "" {
 		plugin, _ = url.QueryUnescape(plugin)
 		parts := strings.SplitN(plugin, ";", 2)
-		node.Extra["plugin"] = parts[0]
+		node.Extra["plugin"] = normalizeSSPlugin(parts[0])
 		if len(parts) > 1 {
 			node.Extra["plugin_opts"] = parts[1]
 		}
 	}
 	return nil
+}
+
+func normalizeSSPlugin(plugin string) string {
+	switch strings.ToLower(strings.TrimSpace(plugin)) {
+	case "simple-obfs":
+		return "obfs-local"
+	default:
+		return strings.TrimSpace(plugin)
+	}
 }
 
 // parseVMessURI 解析 vmess:// URI（V2RayN 格式，Base64 JSON）

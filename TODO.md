@@ -276,3 +276,10 @@
 - [x] 兼容 Base64 包装的 CRLF 多行 URI 订阅
 - [x] 兼容 Shadowsocks `ss://userinfo@host:port/?plugin=...#name` 中 `host:port` 后的空路径 `/`
 - [x] 补充脱敏单元测试，覆盖 simple-obfs plugin 参数解析
+
+## P25 — Shadowsocks simple-obfs 插件名兼容 ✅
+日期：2026-05-10
+
+- [x] URI 订阅中的 `plugin=simple-obfs` 规范化为 `obfs-local`
+- [x] Clash YAML 订阅中的 `plugin: simple-obfs` 规范化为 `obfs-local`
+- [x] 补充 URI 和 Clash YAML 两种入口的单元测试

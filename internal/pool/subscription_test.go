@@ -169,8 +169,33 @@ func TestFetchSupportsBase64SSURIListWithSIP002Path(t *testing.T) {
 	if nodes[0].Name != "Hong Kong" || nodes[0].Server != "hk.example.com" || nodes[0].Port != 9527 {
 		t.Fatalf("unexpected first node: %#v", nodes[0])
 	}
-	if nodes[0].Extra["plugin"] != "simple-obfs" || nodes[0].Extra["plugin_opts"] != "obfs=http;obfs-host=edge.example.com" {
+	if nodes[0].Extra["plugin"] != "obfs-local" || nodes[0].Extra["plugin_opts"] != "obfs=http;obfs-host=edge.example.com" {
 		t.Fatalf("ss plugin options not parsed: %#v", nodes[0].Extra)
+	}
+}
+
+func TestParseClashYAMLNormalizesSimpleObfsPlugin(t *testing.T) {
+	yamlContent := []byte(`
+proxies:
+  - name: ss-obfs
+    type: ss
+    server: ss.example.com
+    port: 8388
+    cipher: aes-128-gcm
+    password: pass
+    plugin: simple-obfs
+    plugin-opts: obfs=http;obfs-host=edge.example.com
+`)
+
+	nodes, err := NewSubscriptionParser().parseClashYAML(yamlContent)
+	if err != nil {
+		t.Fatalf("parse clash yaml: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	if nodes[0].Extra["plugin"] != "obfs-local" || nodes[0].Extra["plugin_opts"] != "obfs=http;obfs-host=edge.example.com" {
+		t.Fatalf("ss plugin options not normalized: %#v", nodes[0].Extra)
 	}
 }
 
