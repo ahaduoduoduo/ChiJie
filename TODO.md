@@ -302,3 +302,10 @@
 - [x] 测试请求固定使用 `least-latency` 和界面输入的地区码
 - [x] 前端 Templates 页面复用原 `Test region` 按钮和结果面板
 - [x] 补充远端 Chijie 成功和网关错误测试
+
+## P28 — 前端地区旗帜自动生成 ✅
+日期：2026-05-11
+
+- [x] Region pill 对任意 ISO-2 地区码自动生成 flag emoji
+- [x] `UK` 兼容显示为 `GB` 旗帜
+- [x] 保留 `UN` 的兜底白旗显示

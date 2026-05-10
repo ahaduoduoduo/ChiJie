@@ -76,7 +76,7 @@ function Seg({ options, value, onChange }) {
 function RegionPill({ code, residential, flag }) {
   // derive flag from code prefix if not given
   const baseCode = code?.replace(/-RES$/, "");
-  const flagEmoji = flag || (window.PG?.REGION_FLAGS?.[baseCode]) || null;
+  const flagEmoji = flag || window.PG?.regionFlag?.(baseCode) || null;
   return (
     <span className={`pill region ${residential ? "res" : ""}`}>
       {flagEmoji && <span style={{fontSize:11, lineHeight:1, marginRight:1, filter:"saturate(0.85)"}}>{flagEmoji}</span>}

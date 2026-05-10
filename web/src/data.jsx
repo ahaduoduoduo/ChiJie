@@ -50,6 +50,22 @@ const REGION_FLAGS = {
   UN: "🏳️",
 };
 
+function normalizeRegionCodeForFlag(code) {
+  const base = String(code || "").trim().toUpperCase().replace(/-RES$/, "");
+  if (base === "UK") return "GB";
+  return base;
+}
+
+function regionFlag(code) {
+  const normalized = normalizeRegionCodeForFlag(code);
+  if (REGION_FLAGS[normalized]) return REGION_FLAGS[normalized];
+  if (!/^[A-Z]{2}$/.test(normalized) || normalized === "UN") return null;
+  return normalized
+    .split("")
+    .map(ch => String.fromCodePoint(0x1F1E6 + ch.charCodeAt(0) - 65))
+    .join("");
+}
+
 let _id = 0;
 const uid = (p) => `${p}_${++_id}`;
 
@@ -174,7 +190,7 @@ function buildRegionGroups(pools) {
         groups[code] = {
           code, region: n.region, residential: !!n.residential,
           name: REGION_NAMES[n.region] || n.region,
-          flag: REGION_FLAGS[n.region] || "🏳️",
+          flag: regionFlag(n.region) || "🏳️",
           count: 0, online: 0, sources: new Set(), latencies: [],
         };
       }
@@ -295,7 +311,7 @@ function buildTraffic(pools) {
 }
 
 window.PG = {
-  REGION_NAMES, REGION_FLAGS,
+  REGION_NAMES, REGION_FLAGS, regionFlag,
   initialPools, initialFingerprints,
   buildRegionGroups, buildTraffic,
   uid,
