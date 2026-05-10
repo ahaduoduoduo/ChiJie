@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +30,12 @@ const MaxProxyResponseBytes = 32 * 1024 * 1024
 
 // MaxProxyAttempts 是一次 /proxy 请求在出口执行失败时允许尝试的最大出口数量。
 const MaxProxyAttempts = 2
+
+// MaxChijieProxyHops 限制 Chijie 之间互相转发时的最大跳数，防止 A/B 循环。
+const MaxChijieProxyHops = 3
+
+const chijieHopHeader = "X-Chijie-Hop"
+const chijieErrorHeader = "X-Chijie-Error"
 
 var errProxyResponseTooLarge = errors.New("upstream response body is too large")
 
@@ -51,6 +59,7 @@ type Server struct {
 	traffic             *traffic.Store
 	httpServer          *http.Server
 	allowPrivateTargets bool
+	remoteChijieClient  *http.Client
 }
 
 // ProxyRequest 客户端发来的代理请求
@@ -60,6 +69,7 @@ type ProxyRequest struct {
 	Headers map[string]string `json:"headers"`
 	Payload string            `json:"payload"`
 	Egress  EgressOptions     `json:"egress"`
+	Hop     int               `json:"-"`
 }
 
 // EgressOptions 由调用方直接声明出口需求。
@@ -184,6 +194,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		writeProxyError(w, http.StatusForbidden, "unauthorized", "")
 		return
 	}
+	proxyHop := chijieHopFromRequest(r)
+	if proxyHop >= MaxChijieProxyHops {
+		writeProxyError(w, http.StatusLoopDetected, "proxy loop detected", fmt.Sprintf("max %s is %d", chijieHopHeader, MaxChijieProxyHops))
+		return
+	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, MaxProxyBodyBytes)
 	body, err := io.ReadAll(r.Body)
@@ -212,6 +227,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if req.Headers == nil {
 		req.Headers = map[string]string{}
 	}
+	req.Hop = proxyHop
 
 	requestBytes := int64(len(body))
 	route, err := s.resolveEgress(req.Egress)
@@ -243,6 +259,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 func writeProxyError(w http.ResponseWriter, status int, code string, detail string) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(chijieErrorHeader, code)
 	w.WriteHeader(status)
 	payload := map[string]string{"error": code}
 	if detail != "" {
@@ -299,8 +316,19 @@ func traceTarget(rawURL string) string {
 	return parsed.Host + parsed.Path
 }
 
+func chijieHopFromRequest(r *http.Request) int {
+	if r == nil {
+		return 0
+	}
+	hop, _ := strconv.Atoi(strings.TrimSpace(r.Header.Get(chijieHopHeader)))
+	if hop < 0 {
+		return 0
+	}
+	return hop
+}
+
 func (s *Server) doProxyWithRetry(ctx context.Context, req *ProxyRequest, route *egressRoute) ([]byte, string, int, *egressRoute, error) {
-	attempts := proxyAttemptRoutes(route, MaxProxyAttempts)
+	attempts := proxyAttemptRoutes(route, proxyAttemptLimit(route))
 	var attemptErrors []string
 	var lastRoute *egressRoute
 	var lastErr error
@@ -326,6 +354,18 @@ func (s *Server) doProxyWithRetry(ctx context.Context, req *ProxyRequest, route 
 		return nil, "", 0, lastRoute, lastErr
 	}
 	return nil, "", 0, lastRoute, fmt.Errorf("proxy request failed")
+}
+
+func proxyAttemptLimit(route *egressRoute) int {
+	if route == nil || len(route.Choices) == 0 {
+		return MaxProxyAttempts
+	}
+	for _, choice := range route.Choices {
+		if choice != nil && choice.Template {
+			return len(route.Choices)
+		}
+	}
+	return MaxProxyAttempts
 }
 
 func proxyAttemptRoutes(route *egressRoute, maxAttempts int) []*egressRoute {
@@ -377,6 +417,10 @@ func isRetryableProxyAttempt(ctx context.Context, err error) bool {
 }
 
 func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRoute) ([]byte, string, int, error) {
+	if isChijieTemplateRoute(route) {
+		return s.doRemoteChijieProxy(ctx, req, route)
+	}
+
 	d, err := s.getDialer(route)
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("get dialer: %w", err)
@@ -464,6 +508,70 @@ func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRo
 
 	contentType := resp.Header.Get("Content-Type")
 	util.Debugf("[egress] %dms via %s → %d (%d bytes)", elapsed.Milliseconds(), d.Name(), resp.StatusCode, len(respBody))
+	return respBody, contentType, resp.StatusCode, nil
+}
+
+func isChijieTemplateRoute(route *egressRoute) bool {
+	return route != nil && route.Choice != nil && route.Choice.Template && pool.NormalizeTemplateType(route.Choice.TemplateType) == "chijie"
+}
+
+func (s *Server) doRemoteChijieProxy(ctx context.Context, req *ProxyRequest, route *egressRoute) ([]byte, string, int, error) {
+	if req == nil || route == nil || route.Choice == nil {
+		return nil, "", 0, fmt.Errorf("remote chijie route is incomplete")
+	}
+	if strings.TrimSpace(route.Choice.BearerToken) == "" {
+		return nil, "", 0, &proxyAttemptError{err: fmt.Errorf("remote chijie %s has no bearer token", routeAttemptName(route))}
+	}
+	proxyURL, err := pool.ChijieProxyURL(route.Choice.Endpoint, 0)
+	if err != nil {
+		return nil, "", 0, &proxyAttemptError{err: fmt.Errorf("remote chijie %s endpoint: %w", routeAttemptName(route), err)}
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("marshal remote chijie request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, proxyURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("create remote chijie request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+strings.TrimSpace(route.Choice.BearerToken))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "*/*")
+	httpReq.Header.Set(chijieHopHeader, strconv.Itoa(req.Hop+1))
+
+	client := s.remoteChijieClient
+	if client == nil {
+		client = &http.Client{
+			Timeout: 30 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+	}
+
+	startTime := time.Now()
+	resp, err := client.Do(httpReq)
+	elapsed := time.Since(startTime)
+	if err != nil {
+		return nil, "", 0, &proxyAttemptError{err: fmt.Errorf("do request via remote chijie %s: %w", routeAttemptName(route), err)}
+	}
+	defer resp.Body.Close()
+
+	respBody, err := readProxyResponseBody(resp, MaxProxyResponseBytes)
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("read remote chijie response: %w", err)
+	}
+	if resp.Header.Get(chijieErrorHeader) != "" {
+		detail := strings.TrimSpace(string(respBody))
+		if len(detail) > 240 {
+			detail = detail[:240] + "..."
+		}
+		return nil, "", 0, &proxyAttemptError{err: fmt.Errorf("remote chijie %s returned gateway error %d: %s", routeAttemptName(route), resp.StatusCode, detail)}
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	util.Debugf("[egress] %dms via remote chijie %s → %d (%d bytes)", elapsed.Milliseconds(), routeAttemptName(route), resp.StatusCode, len(respBody))
 	return respBody, contentType, resp.StatusCode, nil
 }
 

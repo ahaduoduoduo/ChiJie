@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"chijie/internal/pool"
 )
 
 func TestParseTokenDurationSupportsDays(t *testing.T) {
@@ -55,5 +57,31 @@ func TestLoadFingerprintsConfigAllowsMissingFile(t *testing.T) {
 	}
 	if len(cfg.Fingerprints) != 0 {
 		t.Fatalf("expected empty fingerprints map, got %d entries", len(cfg.Fingerprints))
+	}
+}
+
+func TestValidatePoolConfigAcceptsHTTPSChijieTemplate(t *testing.T) {
+	err := validatePoolConfig(&pool.PoolConfig{
+		Source:       "template",
+		TemplateType: "chijie",
+		Endpoint:     "https://b.example.com",
+		BearerToken:  "token",
+		Coverage:     "both",
+		Priority:     100,
+	})
+	if err != nil {
+		t.Fatalf("validate chijie template: %v", err)
+	}
+}
+
+func TestValidatePoolConfigRejectsHTTPChijieTemplate(t *testing.T) {
+	err := validatePoolConfig(&pool.PoolConfig{
+		Source:       "template",
+		TemplateType: "chijie",
+		Endpoint:     "http://b.example.com",
+		BearerToken:  "token",
+	})
+	if err == nil {
+		t.Fatalf("expected http chijie template to be rejected")
 	}
 }

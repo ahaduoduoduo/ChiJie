@@ -23,7 +23,7 @@ chijie/
 │   │   ├── strings.go           # 跨模块共享的字符串工具：FirstNonEmpty / ContainsString / RemoveString / ParseInt / SplitList
 │   │   └── logger.go            # 日志分级：Debugf / Infof / Warnf / Errorf，受 log.level 控制
 │   ├── pool/
-│   │   ├── manager.go           # 节点池：静态/模板/订阅/直连池管理、地区组、家宽组、出口选择
+│   │   ├── manager.go           # 节点池：静态/模板/订阅/直连池管理、地区组、家宽组、出口选择和模板优先级
 │   │   ├── subscription.go      # 订阅解析：Base64 URI 列表、Clash YAML、纯 URI 列表、Shadowsocks SIP002、多订阅地址、URL 与响应大小限制
 │   │   └── health.go            # 健康检查：按池配置后台探测节点连通性和延迟
 │   ├── dialer/
@@ -78,6 +78,7 @@ chijie/
 │   ├── parameter-driven-egress.md # 参数驱动出口模型
 │   ├── proxy-client-usage.md      # 外部服务接入 Proxy API 的独立使用文档
 │   ├── subscription-routing.md    # 订阅节点、地区组和模板节点说明
+│   ├── template-fallback.md       # 模板 fallback、远端 Chijie 和优先级规则
 │   └── tls-fingerprints.md        # TLS 指纹来源、extra_fp 兼容和测试接口语义
 ├── build.sh                     # 构建脚本：前端 build + 复制 dist + Go 编译
 ├── Dockerfile                   # 多阶段容器构建：前端 build + Go build + 运行镜像
@@ -115,7 +116,7 @@ WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读�
 
 - `direct`：直连出口。
 - `static`：手动配置的固定节点。
-- `template`：按地区动态生成代理节点，例如 Bright Data。
+- `template`：按地区动态生成代理节点或转发到远端 Chijie，例如 Bright Data、Lumi、Chijie。
 - `subscription`：从订阅地址自动拉取节点，支持 Clash YAML、Base64 URI 列表和纯 URI 列表。
 
 核心选择入口：
@@ -132,6 +133,7 @@ WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读�
 - 普通请求只使用普通节点和普通模板。
 - 家宽请求只使用家宽节点和家宽模板。
 - 静态节点和订阅节点优先。
+- 模板节点按 `priority` 降序尝试，同优先级按池名排序。
 - 地区无关请求只使用非 `direct` 的静态节点和订阅节点，不使用直连或模板节点。
 - 地区组无可用节点时使用同类型模板节点。
 - 模板节点默认支持任意二字母地区码。

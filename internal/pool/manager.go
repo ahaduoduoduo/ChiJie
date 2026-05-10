@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -23,18 +25,23 @@ type PoolConfig struct {
 	Source            string              `yaml:"source" json:"source"` // direct, static, template, subscription
 	Enabled           *bool               `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Residential       bool                `yaml:"residential,omitempty" json:"residential,omitempty"`
-	URL               string              `yaml:"url" json:"url"`                             // 订阅链接（subscription）
-	UpdateInterval    string              `yaml:"update_interval" json:"update_interval"`     // 订阅更新间隔
-	Filter            *FilterConfig       `yaml:"filter" json:"filter"`                       // 节点过滤
-	HealthCheck       *HealthCheckConfig  `yaml:"health_check" json:"health_check"`           // 健康检查配置
-	Nodes             []dialer.Node       `yaml:"nodes" json:"nodes"`                         // 静态节点列表
-	DisabledNodes     []string            `yaml:"disabled_nodes" json:"disabled_nodes"`       // 禁用节点名
-	Type              string              `yaml:"type" json:"type"`                           // 模板类型（template）
-	Server            string              `yaml:"server" json:"server"`                       // 模板服务器
-	Port              int                 `yaml:"port" json:"port"`                           // 模板端口
+	URL               string              `yaml:"url" json:"url"`                                         // 订阅链接（subscription）
+	UpdateInterval    string              `yaml:"update_interval" json:"update_interval"`                 // 订阅更新间隔
+	Filter            *FilterConfig       `yaml:"filter" json:"filter"`                                   // 节点过滤
+	HealthCheck       *HealthCheckConfig  `yaml:"health_check" json:"health_check"`                       // 健康检查配置
+	Nodes             []dialer.Node       `yaml:"nodes" json:"nodes"`                                     // 静态节点列表
+	DisabledNodes     []string            `yaml:"disabled_nodes" json:"disabled_nodes"`                   // 禁用节点名
+	TemplateType      string              `yaml:"template_type,omitempty" json:"template_type,omitempty"` // proxy, chijie
+	Type              string              `yaml:"type" json:"type"`                                       // 代理模板类型（template）
+	Server            string              `yaml:"server" json:"server"`                                   // 模板服务器
+	Port              int                 `yaml:"port" json:"port"`                                       // 模板端口
+	Endpoint          string              `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`           // 远端 Chijie HTTPS 地址
+	BearerToken       string              `yaml:"bearer_token,omitempty" json:"bearer_token,omitempty"`
 	UsernameTemplate  string              `yaml:"username_template" json:"username_template"` // 用户名模板
 	Password          string              `yaml:"password" json:"password"`                   // 模板密码
-	Tags              []string            `yaml:"tags,omitempty" json:"tags,omitempty"`       // 节点池标签
+	Priority          int                 `yaml:"priority,omitempty" json:"priority,omitempty"`
+	Coverage          string              `yaml:"coverage,omitempty" json:"coverage,omitempty"` // normal, residential, both
+	Tags              []string            `yaml:"tags,omitempty" json:"tags,omitempty"`         // 节点池标签
 	RejectRegex       []string            `yaml:"reject_regex,omitempty" json:"reject_regex,omitempty"`
 	NodeRegions       map[string]string   `yaml:"node_regions,omitempty" json:"node_regions,omitempty"`               // 节点名 → 地区代码
 	NodeAliases       map[string]string   `yaml:"node_aliases,omitempty" json:"node_aliases,omitempty"`               // 别名 → 节点名
@@ -99,15 +106,19 @@ type NodesFileConfig struct {
 
 // EgressChoice 是参数驱动出口选择的结果。
 type EgressChoice struct {
-	Dialer      dialer.Dialer
-	PoolName    string        `json:"pool"`
-	NodeName    string        `json:"node"`
-	Source      string        `json:"source"`
-	Region      string        `json:"region"`
-	Group       string        `json:"group"`
-	Residential bool          `json:"residential"`
-	Template    bool          `json:"template"`
-	Latency     time.Duration `json:"-"`
+	Dialer       dialer.Dialer
+	PoolName     string        `json:"pool"`
+	NodeName     string        `json:"node"`
+	Source       string        `json:"source"`
+	TemplateType string        `json:"template_type,omitempty"`
+	Region       string        `json:"region"`
+	Group        string        `json:"group"`
+	Residential  bool          `json:"residential"`
+	Template     bool          `json:"template"`
+	Priority     int           `json:"priority,omitempty"`
+	Endpoint     string        `json:"endpoint,omitempty"`
+	BearerToken  string        `json:"-"`
+	Latency      time.Duration `json:"-"`
 }
 
 // NewManager 创建节点池管理器
@@ -170,8 +181,15 @@ func (m *Manager) buildPool(name string, cfg *PoolConfig) (*Pool, error) {
 		}
 
 	case "template":
-		// 模板池不预创建节点，按需动态生成
-		// 这里只保存配置
+		if NormalizeTemplateType(cfg.TemplateType) == "chijie" {
+			if _, err := ChijieProxyURL(cfg.Endpoint, cfg.Port); err != nil {
+				return nil, fmt.Errorf("invalid chijie template endpoint: %w", err)
+			}
+			if strings.TrimSpace(cfg.BearerToken) == "" {
+				return nil, fmt.Errorf("chijie template bearer_token is required")
+			}
+		}
+		// 模板池不预创建节点，按需动态生成。这里只保存配置。
 
 	case "subscription":
 		parser := NewSubscriptionParser()
@@ -232,7 +250,7 @@ func (m *Manager) SelectEgressCandidates(region string, strategy string, residen
 	if choices := m.orderEgressChoices(m.entryChoices(region, residential), strategy, EgressGroup(region, residential)); len(choices) > 0 {
 		return choices, nil
 	}
-	if choices := m.orderEgressChoices(m.templateChoices(region, residential), strategy, EgressGroup(region, residential)+":template"); len(choices) > 0 {
+	if choices := m.templateChoices(region, residential); len(choices) > 0 {
 		return choices, nil
 	}
 
@@ -373,27 +391,47 @@ func (m *Manager) templateChoices(region string, residential bool) []*EgressChoi
 
 	choices := make([]*EgressChoice, 0)
 	for poolName, pool := range m.pools {
-		if pool.Config.Source != "template" || !poolEnabled(pool.Config) || pool.Config.Residential != residential {
+		if pool.Config.Source != "template" || !poolEnabled(pool.Config) || !TemplateCoversResidential(pool.Config, residential) {
 			continue
 		}
 
-		d, err := m.buildTemplateDialer(poolName, pool.Config, region)
-		if err != nil {
-			log.Printf("template %s unavailable for %s: %v", poolName, region, err)
-			continue
+		templateType := NormalizeTemplateType(pool.Config.TemplateType)
+		endpoint := ""
+		var d dialer.Dialer
+		if templateType == "chijie" {
+			var err error
+			endpoint, err = ChijieProxyURL(pool.Config.Endpoint, pool.Config.Port)
+			if err != nil {
+				log.Printf("template %s unavailable for %s: %v", poolName, region, err)
+				continue
+			}
+		} else {
+			var err error
+			d, err = m.buildTemplateDialer(poolName, pool.Config, region)
+			if err != nil {
+				log.Printf("template %s unavailable for %s: %v", poolName, region, err)
+				continue
+			}
 		}
 		choices = append(choices, &EgressChoice{
-			Dialer:      d,
-			PoolName:    poolName,
-			NodeName:    fmt.Sprintf("%s-%s", poolName, strings.ToLower(region)),
-			Source:      "template",
-			Region:      region,
-			Group:       EgressGroup(region, residential),
-			Residential: residential,
-			Template:    true,
+			Dialer:       d,
+			PoolName:     poolName,
+			NodeName:     fmt.Sprintf("%s-%s", poolName, strings.ToLower(region)),
+			Source:       "template",
+			TemplateType: templateType,
+			Region:       region,
+			Group:        EgressGroup(region, residential),
+			Residential:  residential,
+			Template:     true,
+			Priority:     pool.Config.Priority,
+			Endpoint:     endpoint,
+			BearerToken:  pool.Config.BearerToken,
 		})
 	}
 	sort.Slice(choices, func(i, j int) bool {
+		if choices[i].Priority != choices[j].Priority {
+			return choices[i].Priority > choices[j].Priority
+		}
 		return choices[i].PoolName < choices[j].PoolName
 	})
 	return choices
@@ -417,6 +455,83 @@ func templateUsername(usernameTemplate string, region string) string {
 	username := strings.ReplaceAll(usernameTemplate, "{region}", strings.ToLower(region))
 	username = strings.ReplaceAll(username, "{REGION}", strings.ToUpper(region))
 	return username
+}
+
+// NormalizeTemplateType 标准化模板提供方类型。空值保持旧配置语义，按普通代理模板处理。
+func NormalizeTemplateType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "proxy", "generic", "generic-proxy":
+		return "proxy"
+	case "chijie":
+		return "chijie"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+// NormalizeTemplateCoverage 标准化模板覆盖范围。旧配置没有 coverage 时按 residential 布尔值区分。
+func NormalizeTemplateCoverage(value string, residential bool, templateType string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "normal", "residential", "both":
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+	if NormalizeTemplateType(templateType) == "chijie" {
+		return "both"
+	}
+	if residential {
+		return "residential"
+	}
+	return "normal"
+}
+
+// TemplateCoversResidential 判断模板是否服务当前普通/家宽请求。
+func TemplateCoversResidential(cfg *PoolConfig, residential bool) bool {
+	if cfg == nil {
+		return false
+	}
+	switch NormalizeTemplateCoverage(cfg.Coverage, cfg.Residential, cfg.TemplateType) {
+	case "both":
+		return true
+	case "residential":
+		return residential
+	default:
+		return !residential
+	}
+}
+
+// ChijieProxyURL 返回远端 Chijie 的 /proxy HTTPS 地址。endpoint 可只填写域名。
+func ChijieProxyURL(endpoint string, port int) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", fmt.Errorf("chijie endpoint is required")
+	}
+	if !strings.Contains(endpoint, "://") {
+		endpoint = "https://" + endpoint
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("parse chijie endpoint: %w", err)
+	}
+	if parsed.Scheme != "https" {
+		return "", fmt.Errorf("chijie template endpoint must use https")
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("chijie endpoint has no host")
+	}
+	if port > 0 && parsed.Port() == "" {
+		parsed.Host = net.JoinHostPort(parsed.Hostname(), fmt.Sprintf("%d", port))
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	basePath := strings.TrimRight(parsed.Path, "/")
+	if basePath == "" {
+		parsed.Path = "/proxy"
+	} else if !strings.HasSuffix(basePath, "/proxy") {
+		parsed.Path = basePath + "/proxy"
+	} else {
+		parsed.Path = basePath
+	}
+	return parsed.String(), nil
 }
 
 func (m *Manager) pickEgressChoice(choices []*EgressChoice, strategy string, rrKey string) *EgressChoice {

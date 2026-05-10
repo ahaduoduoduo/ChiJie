@@ -1,6 +1,20 @@
 // Templates
 const { Modal, Toggle, useToast } = window.UI;
 
+function templateType(tpl) {
+  return tpl.template_type || "proxy";
+}
+
+function templateCoverage(tpl) {
+  return tpl.coverage || (templateType(tpl) === "chijie" ? "both" : (tpl.residential ? "residential" : "normal"));
+}
+
+function templateClassLabel(tpl) {
+  const coverage = templateCoverage(tpl);
+  if (coverage === "both") return "normal + residential";
+  return coverage === "residential" ? "residential" : "normal";
+}
+
 function PageTemplates({ state, dispatch }) {
   const { pools } = state;
   const tpls = pools.filter(p => p.source === "template");
@@ -26,26 +40,37 @@ function PageTemplates({ state, dispatch }) {
           <div key={t.name} className="card">
             <div className="card-h bordered">
               <h3 className="mono">{t.name}</h3>
-              <span className={`pill ${t.residential ? "res" : ""}`} style={t.residential ? {} : {fontFamily:"Inter",fontSize:10.5,letterSpacing:0,padding:"0 8px"}}>{t.residential ? "residential" : "normal"}</span>
+              <span className={`pill ${templateCoverage(t) !== "normal" ? "res" : ""}`} style={templateCoverage(t) !== "normal" ? {} : {fontFamily:"Inter",fontSize:10.5,letterSpacing:0,padding:"0 8px"}}>{templateClassLabel(t)}</span>
+              <span className="pill mono">p{t.priority || 0}</span>
               <div className="right">
                 <Toggle on={t.enabled} onChange={() => dispatch({type:"togglePool", name: t.name})}/>
               </div>
             </div>
             <div className="card-body">
               <div className="kv" style={{rowGap:14}}>
-                <div className="k">Type</div><div className="v mono">{t.type}</div>
-                <div className="k">Server</div><div className="v mono">{t.server}:{t.port}</div>
-                <div className="k">Username</div>
-                <div className="v mono" style={{fontSize:11.5, wordBreak:"break-all", lineHeight:1.5}}>{t.username_template}</div>
-                <div className="k">Password</div><div className="v mono">{t.password}</div>
+                <div className="k">Provider</div><div className="v mono">{templateType(t)}</div>
+                {templateType(t) === "chijie" ? (
+                  <>
+                    <div className="k">Endpoint</div><div className="v mono" style={{fontSize:11.5, wordBreak:"break-all", lineHeight:1.5}}>{t.endpoint}{t.port ? `:${t.port}` : ""}</div>
+                    <div className="k">Bearer</div><div className="v mono">{t.bearer_token}</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="k">Type</div><div className="v mono">{t.type}</div>
+                    <div className="k">Server</div><div className="v mono">{t.server}:{t.port}</div>
+                    <div className="k">Username</div>
+                    <div className="v mono" style={{fontSize:11.5, wordBreak:"break-all", lineHeight:1.5}}>{t.username_template}</div>
+                    <div className="k">Password</div><div className="v mono">{t.password}</div>
+                  </>
+                )}
                 <div className="k">Coverage</div>
                 <div className="v">
                   <span className="pill mono">any ISO-2</span>
-                  <div className="muted-2" style={{marginTop:6, fontSize:11.5}}>{t.residential ? "serves *-RES groups" : "serves normal groups"}</div>
+                  <div className="muted-2" style={{marginTop:6, fontSize:11.5}}>{templateClassLabel(t)} · higher priority tries first</div>
                 </div>
               </div>
               <div style={{marginTop:20}} className="row gap-12">
-                <button className="btn sm" onClick={() => setTest(t)}><Ic.test/> Test region</button>
+                <button className="btn sm" disabled={templateType(t) === "chijie"} onClick={() => setTest(t)}><Ic.test/> Test region</button>
                 <button className="btn sm ghost" onClick={() => setEditTpl(t)}><Ic.edit/> Edit</button>
                 <button className="btn sm ghost danger ml-auto" onClick={() => dispatch({type:"deletePool", pool:t.name})}><Ic.trash/> Remove</button>
               </div>
@@ -68,28 +93,51 @@ function PageTemplates({ state, dispatch }) {
 function AddTemplateModal({ open, onClose, dispatch, toast }) {
   const [form, setForm] = React.useState({
     name: "",
+    template_type: "proxy",
     type: "http_proxy",
     server: "",
+    endpoint: "",
     port: 33335,
+    bearer_token: "",
     username_template: "",
     password: "",
+    priority: 0,
+    coverage: "normal",
     residential: false,
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const submit = async () => {
-    if (!form.name.trim() || !form.server.trim() || !form.type.trim()) {
-      toast("Name, type and server are required");
+    const isChijie = form.template_type === "chijie";
+    if (!form.name.trim()) {
+      toast("Pool name is required");
+      return;
+    }
+    if (isChijie && (!form.endpoint.trim() || !form.bearer_token.trim())) {
+      toast("Endpoint and Bearer are required");
+      return;
+    }
+    if (isChijie && form.endpoint.trim().toLowerCase().startsWith("http://")) {
+      toast("Chijie endpoint must use HTTPS");
+      return;
+    }
+    if (!isChijie && (!form.server.trim() || !form.type.trim())) {
+      toast("Type and server are required");
       return;
     }
     const ok = await dispatch({type:"addPool", name: form.name.trim(), config:{
       source: "template",
       enabled: true,
-      type: form.type,
-      server: form.server.trim(),
+      template_type: form.template_type,
+      type: isChijie ? "" : form.type,
+      server: isChijie ? "" : form.server.trim(),
+      endpoint: isChijie ? form.endpoint.trim() : "",
       port: Number(form.port || 0),
-      username_template: form.username_template,
-      password: form.password,
-      residential: form.residential,
+      bearer_token: isChijie ? form.bearer_token : "",
+      username_template: isChijie ? "" : form.username_template,
+      password: isChijie ? "" : form.password,
+      priority: Number(form.priority || 0),
+      coverage: form.coverage,
+      residential: form.coverage === "residential",
     }});
     if (ok) onClose();
   };
@@ -102,20 +150,38 @@ function AddTemplateModal({ open, onClose, dispatch, toast }) {
       <div className="col gap-12">
         <div className="field-row">
           <div className="field"><label className="field-label">Pool name</label><input className="input mono" value={form.name} onChange={e => set("name", e.target.value)} placeholder="brightdata-eu"/></div>
-          <div className="field"><label className="field-label">Type</label>
-            <select className="select" value={form.type} onChange={e => set("type", e.target.value)}><option>http_proxy</option><option>socks5</option></select></div>
+          <div className="field"><label className="field-label">Provider</label>
+            <select className="select" value={form.template_type} onChange={e => setForm(f => ({...f, template_type: e.target.value, port: e.target.value === "chijie" ? "" : (f.port || 33335), coverage: e.target.value === "chijie" ? "both" : f.coverage}))}><option value="proxy">Generic proxy</option><option value="chijie">Chijie</option></select></div>
         </div>
+        {form.template_type === "chijie" ? (
+          <>
+            <div className="field-row">
+              <div className="field"><label className="field-label">HTTPS endpoint</label><input className="input mono" value={form.endpoint} onChange={e => set("endpoint", e.target.value)} placeholder="https://b.example.com"/></div>
+              <div className="field"><label className="field-label">Port optional</label><input className="input mono" value={form.port} onChange={e => set("port", e.target.value)} placeholder="443"/></div>
+            </div>
+            <div className="field"><label className="field-label">Bearer</label><input className="input mono" type="password" value={form.bearer_token} onChange={e => set("bearer_token", e.target.value)}/></div>
+          </>
+        ) : (
+          <>
+            <div className="field-row">
+              <div className="field"><label className="field-label">Type</label>
+                <select className="select" value={form.type} onChange={e => set("type", e.target.value)}><option>http_proxy</option><option>socks5</option></select></div>
+              <div className="field"><label className="field-label">Port</label><input className="input mono" value={form.port} onChange={e => set("port", e.target.value)}/></div>
+            </div>
+            <div className="field"><label className="field-label">Server</label><input className="input mono" value={form.server} onChange={e => set("server", e.target.value)} placeholder="brd.superproxy.io"/></div>
+            <div className="field"><label className="field-label">Username template</label>
+              <input className="input mono" value={form.username_template} onChange={e => set("username_template", e.target.value)} placeholder="brd-customer-xxx-zone-yyy-country-{region}"/>
+              <div className="field-hint"><span className="mono">{`{region}`}</span> → lowercase · <span className="mono">{`{REGION}`}</span> → uppercase</div></div>
+            <div className="field"><label className="field-label">Password</label><input className="input mono" type="password" value={form.password} onChange={e => set("password", e.target.value)}/></div>
+          </>
+        )}
         <div className="field-row">
-          <div className="field"><label className="field-label">Server</label><input className="input mono" value={form.server} onChange={e => set("server", e.target.value)} placeholder="brd.superproxy.io"/></div>
-          <div className="field"><label className="field-label">Port</label><input className="input mono" value={form.port} onChange={e => set("port", e.target.value)}/></div>
+          <div className="field"><label className="field-label">Priority</label><input className="input mono" value={form.priority} onChange={e => set("priority", e.target.value)} placeholder="100"/></div>
+          <div className="field"><label className="field-label">Coverage</label>
+            <select className="select" value={form.coverage} onChange={e => set("coverage", e.target.value)}><option value="normal">Normal</option><option value="residential">Residential</option><option value="both">Both</option></select></div>
         </div>
-        <div className="field"><label className="field-label">Username template</label>
-          <input className="input mono" value={form.username_template} onChange={e => set("username_template", e.target.value)} placeholder="brd-customer-xxx-zone-yyy-country-{region}"/>
-          <div className="field-hint"><span className="mono">{`{region}`}</span> → lowercase · <span className="mono">{`{REGION}`}</span> → uppercase</div></div>
-        <div className="field"><label className="field-label">Password</label><input className="input mono" type="password" value={form.password} onChange={e => set("password", e.target.value)}/></div>
         <div className="field" style={{flexDirection:"row", justifyContent:"space-between", alignItems:"flex-start"}}>
-          <div><div className="field-label">Class</div><div className="field-hint" style={{maxWidth:280}}>Normal templates only serve normal requests; residential only serves residential.</div></div>
-          <Toggle on={form.residential} onChange={v => set("residential", v)} label="Residential"/>
+          <div><div className="field-label">Fallback order</div><div className="field-hint" style={{maxWidth:360}}>Templates are tried by priority after local static and subscription nodes are unavailable.</div></div>
         </div>
       </div>
     </Modal>
@@ -124,40 +190,64 @@ function AddTemplateModal({ open, onClose, dispatch, toast }) {
 
 function EditTemplateModal({ tpl, onClose, dispatch, toast }) {
   const [form, setForm] = React.useState({
+    template_type: "proxy",
     type: "http_proxy",
     server: "",
+    endpoint: "",
     port: 33335,
+    bearer_token: "",
     username_template: "",
     password: "",
+    priority: 0,
+    coverage: "normal",
     residential: false,
   });
   React.useEffect(() => {
     if (!tpl) return;
     setForm({
+      template_type: tpl.template_type || "proxy",
       type: tpl.type || "http_proxy",
       server: tpl.server || "",
-      port: tpl.port || 33335,
+      endpoint: tpl.endpoint || "",
+      port: tpl.port || (tpl.template_type === "chijie" ? "" : 33335),
+      bearer_token: tpl.config?.bearer_token || "",
       username_template: tpl.username_template || "",
       password: tpl.config?.password || "",
+      priority: tpl.priority || 0,
+      coverage: templateCoverage(tpl),
       residential: !!tpl.residential,
     });
   }, [tpl]);
   if (!tpl) return null;
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const submit = async () => {
-    if (!form.server.trim() || !form.type.trim()) {
+    const isChijie = form.template_type === "chijie";
+    if (isChijie && (!form.endpoint.trim() || !form.bearer_token.trim())) {
+      toast("Endpoint and Bearer are required");
+      return;
+    }
+    if (isChijie && form.endpoint.trim().toLowerCase().startsWith("http://")) {
+      toast("Chijie endpoint must use HTTPS");
+      return;
+    }
+    if (!isChijie && (!form.server.trim() || !form.type.trim())) {
       toast("Type and server are required");
       return;
     }
     const ok = await dispatch({type:"updatePoolConfig", pool: tpl.name, patch:{
       source: "template",
       enabled: tpl.enabled,
-      type: form.type,
-      server: form.server.trim(),
+      template_type: form.template_type,
+      type: isChijie ? "" : form.type,
+      server: isChijie ? "" : form.server.trim(),
+      endpoint: isChijie ? form.endpoint.trim() : "",
       port: Number(form.port || 0),
-      username_template: form.username_template,
-      password: form.password,
-      residential: form.residential,
+      bearer_token: isChijie ? form.bearer_token : "",
+      username_template: isChijie ? "" : form.username_template,
+      password: isChijie ? "" : form.password,
+      priority: Number(form.priority || 0),
+      coverage: form.coverage,
+      residential: form.coverage === "residential",
     }});
     if (ok) onClose();
   };
@@ -171,6 +261,25 @@ function EditTemplateModal({ tpl, onClose, dispatch, toast }) {
         <div className="field"><label className="field-label">Pool name</label>
           <input className="input mono" value={tpl.name} disabled /></div>
         <div className="field-row">
+          <div className="field"><label className="field-label">Provider</label>
+            <select className="select" value={form.template_type} onChange={e => setForm(f => ({...f, template_type: e.target.value, port: e.target.value === "chijie" ? "" : (f.port || 33335), coverage: e.target.value === "chijie" ? "both" : f.coverage}))}><option value="proxy">Generic proxy</option><option value="chijie">Chijie</option></select></div>
+          <div className="field"><label className="field-label">Priority</label>
+            <input className="input mono" value={form.priority} onChange={e => set("priority", e.target.value)}/></div>
+        </div>
+        {form.template_type === "chijie" ? (
+          <>
+            <div className="field-row">
+              <div className="field"><label className="field-label">HTTPS endpoint</label>
+                <input className="input mono" value={form.endpoint} onChange={e => set("endpoint", e.target.value)} placeholder="https://b.example.com"/></div>
+              <div className="field"><label className="field-label">Port optional</label>
+                <input className="input mono" value={form.port} onChange={e => set("port", e.target.value)} placeholder="443"/></div>
+            </div>
+            <div className="field"><label className="field-label">Bearer</label>
+              <input className="input mono" type="password" value={form.bearer_token} onChange={e => set("bearer_token", e.target.value)}/></div>
+          </>
+        ) : (
+          <>
+        <div className="field-row">
           <div className="field"><label className="field-label">Type</label>
             <select className="select" value={form.type} onChange={e => set("type", e.target.value)}><option>http_proxy</option><option>socks5</option></select></div>
           <div className="field"><label className="field-label">Port</label>
@@ -183,9 +292,14 @@ function EditTemplateModal({ tpl, onClose, dispatch, toast }) {
           <div className="field-hint"><span className="mono">{`{region}`}</span> → lowercase · <span className="mono">{`{REGION}`}</span> → uppercase</div></div>
         <div className="field"><label className="field-label">Password</label>
           <input className="input mono" type="password" value={form.password} onChange={e => set("password", e.target.value)}/></div>
+          </>
+        )}
+        <div className="field-row">
+          <div className="field"><label className="field-label">Coverage</label>
+            <select className="select" value={form.coverage} onChange={e => set("coverage", e.target.value)}><option value="normal">Normal</option><option value="residential">Residential</option><option value="both">Both</option></select></div>
+        </div>
         <div className="field" style={{flexDirection:"row", justifyContent:"space-between", alignItems:"flex-start"}}>
-          <div><div className="field-label">Class</div><div className="field-hint" style={{maxWidth:280}}>Normal templates only serve normal requests; residential only serves residential.</div></div>
-          <Toggle on={form.residential} onChange={v => set("residential", v)} label="Residential"/>
+          <div><div className="field-label">Fallback order</div><div className="field-hint" style={{maxWidth:360}}>Templates are tried by priority after local static and subscription nodes are unavailable.</div></div>
         </div>
       </div>
     </Modal>

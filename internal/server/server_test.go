@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -254,6 +255,142 @@ func TestDoProxyWithRetryDoesNotRetryResponseStatus(t *testing.T) {
 	}
 	if secondAttempts != 0 {
 		t.Fatalf("second candidate should not be called, got %d attempts", secondAttempts)
+	}
+}
+
+func TestRemoteChijieTemplateForwardsRequestWithBearerAndHop(t *testing.T) {
+	var seen ProxyRequest
+	remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/proxy" {
+			t.Fatalf("path: got %q want /proxy", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer remote-token" {
+			t.Fatalf("authorization: got %q", got)
+		}
+		if got := r.Header.Get(chijieHopHeader); got != "2" {
+			t.Fatalf("hop: got %q want 2", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&seen); err != nil {
+			t.Fatalf("decode forwarded body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("remote-ok"))
+	}))
+	defer remote.Close()
+
+	route := &egressRoute{
+		Region: "NG",
+		Group:  "NG",
+		Choices: []*pool.EgressChoice{
+			{PoolName: "chijie-b", NodeName: "chijie-b-ng", Source: "template", Template: true, TemplateType: "chijie", Region: "NG", Group: "NG", Endpoint: remote.URL, BearerToken: "remote-token"},
+		},
+	}
+	req := &ProxyRequest{
+		URL:     "https://target.example/data",
+		Method:  http.MethodPost,
+		Headers: map[string]string{"X-Test": "yes"},
+		Payload: "payload",
+		Egress:  EgressOptions{Region: "NG", Strategy: "least-latency"},
+		Hop:     1,
+	}
+
+	body, contentType, statusCode, finalRoute, err := (&Server{remoteChijieClient: remote.Client()}).doProxyWithRetry(context.Background(), req, route)
+	if err != nil {
+		t.Fatalf("remote chijie proxy: %v", err)
+	}
+	if string(body) != "remote-ok" || statusCode != http.StatusOK || contentType != "text/plain" {
+		t.Fatalf("unexpected response: body=%q status=%d contentType=%q", body, statusCode, contentType)
+	}
+	if finalRoute == nil || finalRoute.Choice == nil || finalRoute.Choice.PoolName != "chijie-b" {
+		t.Fatalf("unexpected final route: %#v", finalRoute)
+	}
+	if seen.URL != req.URL || seen.Method != req.Method || seen.Payload != req.Payload || seen.Headers["X-Test"] != "yes" {
+		t.Fatalf("request was not forwarded as proxy payload: %#v", seen)
+	}
+	if seen.Egress.Region != "NG" || seen.Egress.Strategy != "least-latency" {
+		t.Fatalf("egress was not forwarded: %#v", seen.Egress)
+	}
+}
+
+func TestRemoteChijieGatewayErrorFallsBackToNextTemplate(t *testing.T) {
+	remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(chijieErrorHeader, "egress failed")
+		writeProxyError(w, http.StatusBadGateway, "proxy request failed", "remote has no node")
+	}))
+	defer remote.Close()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fallback-ok"))
+	}))
+	defer target.Close()
+
+	fallback := &testDialer{
+		name: "fallback",
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+	}
+	route := &egressRoute{
+		Region: "NG",
+		Group:  "NG",
+		Choices: []*pool.EgressChoice{
+			{PoolName: "chijie-b", NodeName: "chijie-b-ng", Source: "template", Template: true, TemplateType: "chijie", Region: "NG", Group: "NG", Endpoint: remote.URL, BearerToken: "remote-token"},
+			{Dialer: fallback, PoolName: "brightdata", NodeName: "brightdata-ng", Source: "template", Template: true, TemplateType: "proxy", Region: "NG", Group: "NG"},
+		},
+	}
+
+	body, _, statusCode, finalRoute, err := (&Server{remoteChijieClient: remote.Client()}).doProxyWithRetry(context.Background(), &ProxyRequest{
+		URL:    target.URL,
+		Method: http.MethodGet,
+	}, route)
+	if err != nil {
+		t.Fatalf("proxy with template fallback: %v", err)
+	}
+	if string(body) != "fallback-ok" || statusCode != http.StatusOK {
+		t.Fatalf("unexpected fallback response: body=%q status=%d", body, statusCode)
+	}
+	if finalRoute == nil || finalRoute.Choice == nil || finalRoute.Choice.PoolName != "brightdata" {
+		t.Fatalf("expected brightdata fallback, got %#v", finalRoute)
+	}
+}
+
+func TestRemoteChijieSourceStatusDoesNotFallback(t *testing.T) {
+	remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden by target", http.StatusForbidden)
+	}))
+	defer remote.Close()
+
+	var fallbackAttempts int
+	fallback := &testDialer{
+		name: "unused",
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			fallbackAttempts++
+			return nil, errors.New("should not be called")
+		},
+	}
+	route := &egressRoute{
+		Region: "NG",
+		Group:  "NG",
+		Choices: []*pool.EgressChoice{
+			{PoolName: "chijie-b", NodeName: "chijie-b-ng", Source: "template", Template: true, TemplateType: "chijie", Region: "NG", Group: "NG", Endpoint: remote.URL, BearerToken: "remote-token"},
+			{Dialer: fallback, PoolName: "brightdata", NodeName: "brightdata-ng", Source: "template", Template: true, TemplateType: "proxy", Region: "NG", Group: "NG"},
+		},
+	}
+
+	_, _, statusCode, finalRoute, err := (&Server{remoteChijieClient: remote.Client()}).doProxyWithRetry(context.Background(), &ProxyRequest{
+		URL:    "https://target.example/data",
+		Method: http.MethodGet,
+	}, route)
+	if err != nil {
+		t.Fatalf("remote target status should be returned without retry error: %v", err)
+	}
+	if statusCode != http.StatusForbidden {
+		t.Fatalf("status: got %d want %d", statusCode, http.StatusForbidden)
+	}
+	if finalRoute == nil || finalRoute.Choice == nil || finalRoute.Choice.PoolName != "chijie-b" {
+		t.Fatalf("expected remote chijie final route, got %#v", finalRoute)
+	}
+	if fallbackAttempts != 0 {
+		t.Fatalf("fallback should not be called, got %d attempts", fallbackAttempts)
 	}
 }
 

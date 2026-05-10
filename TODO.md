@@ -283,3 +283,13 @@
 - [x] URI 订阅中的 `plugin=simple-obfs` 规范化为 `obfs-local`
 - [x] Clash YAML 订阅中的 `plugin: simple-obfs` 规范化为 `obfs-local`
 - [x] 补充 URI 和 Clash YAML 两种入口的单元测试
+
+## P26 — 远端 Chijie 模板与优先级 fallback ✅
+日期：2026-05-10
+
+- [x] 新增 `template_type: chijie`，只允许 HTTPS endpoint，并使用远端 Proxy token 转发请求
+- [x] 模板候选按 `priority` 降序尝试，支持 Chijie、BrightData、Lumi 等多模板顺序 fallback
+- [x] Chijie 模板转发时保持原 `/proxy` body，只替换远端 Bearer
+- [x] 新增 `X-Chijie-Hop` 循环保护和 `X-Chijie-Error` 网关错误识别
+- [x] Admin Templates 支持 Provider、Priority、Coverage、Chijie endpoint 和 Bearer 配置
+- [x] 补充后端选择、远端转发、HTTPS 校验和 fallback 行为测试

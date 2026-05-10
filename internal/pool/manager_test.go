@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -338,6 +339,75 @@ func TestSelectEgressUsesTemplateForColdRegion(t *testing.T) {
 	}
 	if !residentialChoice.Template || residentialChoice.PoolName != "brightdata-res" || residentialChoice.Group != "NG-RES" {
 		t.Fatalf("unexpected residential template choice: %#v", residentialChoice)
+	}
+}
+
+func TestSelectEgressTemplatesUsePriorityOrder(t *testing.T) {
+	manager := NewManager()
+	low, err := manager.buildPool("lumi", &PoolConfig{
+		Source:           "template",
+		Type:             "socks5",
+		Server:           "lumi.example.com",
+		Port:             22225,
+		UsernameTemplate: "lumi-{region}",
+		Password:         "secret",
+		Priority:         10,
+	})
+	if err != nil {
+		t.Fatalf("build low priority template: %v", err)
+	}
+	high, err := manager.buildPool("chijie-b", &PoolConfig{
+		Source:       "template",
+		TemplateType: "chijie",
+		Endpoint:     "https://b.example.com",
+		BearerToken:  "token",
+		Priority:     100,
+	})
+	if err != nil {
+		t.Fatalf("build high priority template: %v", err)
+	}
+	mid, err := manager.buildPool("brightdata", &PoolConfig{
+		Source:           "template",
+		Type:             "socks5",
+		Server:           "brightdata.example.com",
+		Port:             22225,
+		UsernameTemplate: "bd-{region}",
+		Password:         "secret",
+		Priority:         50,
+	})
+	if err != nil {
+		t.Fatalf("build mid priority template: %v", err)
+	}
+	manager.pools["lumi"] = low
+	manager.pools["chijie-b"] = high
+	manager.pools["brightdata"] = mid
+
+	choices, err := manager.SelectEgressCandidates("NG", "random", false)
+	if err != nil {
+		t.Fatalf("select template candidates: %v", err)
+	}
+	got := []string{choices[0].PoolName, choices[1].PoolName, choices[2].PoolName}
+	want := []string{"chijie-b", "brightdata", "lumi"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("template priority order: got %v want %v", got, want)
+		}
+	}
+	if choices[0].TemplateType != "chijie" || choices[0].Endpoint != "https://b.example.com/proxy" {
+		t.Fatalf("unexpected chijie choice: %#v", choices[0])
+	}
+}
+
+func TestChijieTemplateRejectsHTTP(t *testing.T) {
+	manager := NewManager()
+	_, err := manager.buildPool("remote", &PoolConfig{
+		Source:       "template",
+		TemplateType: "chijie",
+		Endpoint:     "http://b.example.com",
+		BearerToken:  "token",
+	})
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("expected https-only chijie template error, got %v", err)
 	}
 }
 

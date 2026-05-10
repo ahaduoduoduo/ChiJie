@@ -96,6 +96,7 @@ Admin 登录限速的客户端 IP 在 Cloudflare 部署下优先读取 `CF-Conne
 外部服务接入 Proxy API 详见 [docs/proxy-client-usage.md](docs/proxy-client-usage.md)。
 参数驱动出口模型详见 [docs/parameter-driven-egress.md](docs/parameter-driven-egress.md)。
 订阅节点地区识别、节点元数据和模板语义详见 [docs/subscription-routing.md](docs/subscription-routing.md)。
+模板 fallback、远端 Chijie 和优先级规则详见 [docs/template-fallback.md](docs/template-fallback.md)。
 Admin 前端接入和构建说明详见 [docs/admin-frontend.md](docs/admin-frontend.md)。
 TLS 指纹配置、`extra_fp` 兼容和测试接口详见 [docs/tls-fingerprints.md](docs/tls-fingerprints.md)。
 Docker 部署详见 [docs/docker-deployment.md](docs/docker-deployment.md)。
@@ -169,7 +170,7 @@ Content-Type: application/json
 4. `residential=false` 查找普通地区组，例如 `US`。
 5. `residential=true` 查找家宽地区组，例如 `US-RES`。
 6. 地区组内存在可用静态节点或订阅节点时，按 `strategy` 选择节点。
-7. 地区组内没有可用节点时，使用同类型模板节点生成出口。
+7. 地区组内没有可用节点时，使用同类型模板节点生成出口；模板按 `priority` 从高到低尝试。
 8. 没有可用节点也没有同类型模板时返回错误。
 
 任意地区出口不会使用 `direct`、`type: direct` 静态节点或模板节点，因为模板节点需要明确地区码来生成代理账号。

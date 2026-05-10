@@ -1245,14 +1245,33 @@ func validatePoolConfig(config *pool.PoolConfig) error {
 		}
 		return nil
 	case "template":
-		node := &dialer.Node{
-			Name:   "template",
-			Type:   config.Type,
-			Server: config.Server,
-			Port:   config.Port,
+		config.TemplateType = pool.NormalizeTemplateType(config.TemplateType)
+		switch config.TemplateType {
+		case "chijie":
+			if _, err := pool.ChijieProxyURL(config.Endpoint, config.Port); err != nil {
+				return fmt.Errorf("invalid chijie template endpoint: %w", err)
+			}
+			if strings.TrimSpace(config.BearerToken) == "" {
+				return fmt.Errorf("chijie template bearer_token is required")
+			}
+		case "proxy":
+			node := &dialer.Node{
+				Name:   "template",
+				Type:   config.Type,
+				Server: config.Server,
+				Port:   config.Port,
+			}
+			if err := validateNodeConfig(node); err != nil {
+				return fmt.Errorf("invalid template config: %w", err)
+			}
+		default:
+			return fmt.Errorf("unsupported template_type: %s", config.TemplateType)
 		}
-		if err := validateNodeConfig(node); err != nil {
-			return fmt.Errorf("invalid template config: %w", err)
+		config.Coverage = pool.NormalizeTemplateCoverage(config.Coverage, config.Residential, config.TemplateType)
+		switch config.Coverage {
+		case "normal", "residential", "both":
+		default:
+			return fmt.Errorf("invalid coverage: %s", config.Coverage)
 		}
 		return nil
 	case "static":
