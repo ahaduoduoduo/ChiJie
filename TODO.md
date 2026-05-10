@@ -293,3 +293,12 @@
 - [x] 新增 `X-Chijie-Hop` 循环保护和 `X-Chijie-Error` 网关错误识别
 - [x] Admin Templates 支持 Provider、Priority、Coverage、Chijie endpoint 和 Bearer 配置
 - [x] 补充后端选择、远端转发、HTTPS 校验和 fallback 行为测试
+
+## P27 — Chijie 模板测试复用 Test region ✅
+日期：2026-05-11
+
+- [x] `/api/nodes/template/test` 支持 `template_type: chijie`
+- [x] Chijie 模板测试通过远端 `/proxy` 请求 `https://api.ipify.org?format=json`
+- [x] 测试请求固定使用 `least-latency` 和界面输入的地区码
+- [x] 前端 Templates 页面复用原 `Test region` 按钮和结果面板
+- [x] 补充远端 Chijie 成功和网关错误测试

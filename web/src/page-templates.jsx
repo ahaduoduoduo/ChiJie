@@ -70,7 +70,7 @@ function PageTemplates({ state, dispatch }) {
                 </div>
               </div>
               <div style={{marginTop:20}} className="row gap-12">
-                <button className="btn sm" disabled={templateType(t) === "chijie"} onClick={() => setTest(t)}><Ic.test/> Test region</button>
+                <button className="btn sm" onClick={() => setTest(t)}><Ic.test/> Test region</button>
                 <button className="btn sm ghost" onClick={() => setEditTpl(t)}><Ic.edit/> Edit</button>
                 <button className="btn sm ghost danger ml-auto" onClick={() => dispatch({type:"deletePool", pool:t.name})}><Ic.trash/> Remove</button>
               </div>
@@ -313,6 +313,7 @@ function TemplateTest({ tpl, dispatch }) {
   const [result, setResult] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   if (!tpl) return null;
+  const isChijie = templateType(tpl) === "chijie";
   const target = targetMode === "custom" ? customTarget : targetMode;
   const resolved = (tpl.username_template || "").replaceAll("{region}", region.toLowerCase()).replaceAll("{REGION}", region.toUpperCase());
   const phaseLabel = {
@@ -320,6 +321,7 @@ function TemplateTest({ tpl, dispatch }) {
     proxy_connect: "proxy connect",
     tls_handshake: "tls handshake",
     target_http: "target http",
+    remote_chijie: "remote chijie",
     timeout: "timeout",
     request: "request",
   }[result?.phase] || result?.phase || "—";
@@ -327,7 +329,9 @@ function TemplateTest({ tpl, dispatch }) {
     ? "Proxy rejected CONNECT before target response. Check Bright Data zone permission, country parameter, password, whitelist and target policy."
     : result?.phase === "target_http"
       ? "Target returned an HTTP response through the proxy."
-      : "";
+      : result?.phase === "remote_chijie"
+        ? "Remote Chijie returned a /proxy response for the requested region."
+        : "";
   const countryMismatch = result?.country_code && result?.region && result.country_code !== result.region;
   const ipSignals = [
     result?.ip_proxy ? "proxy" : "",
@@ -350,8 +354,8 @@ function TemplateTest({ tpl, dispatch }) {
         <div className="field"><label className="field-label">Custom URL</label>
           <input className="input mono" value={customTarget} onChange={e => setCustomTarget(e.target.value)} placeholder="https://example.com/"/></div>
       )}
-      <div className="field"><label className="field-label">Resolved username</label>
-        <div className="mono" style={{padding:"10px 12px", background:"var(--bg-2)", border:"1px solid var(--line-2)", borderRadius:6, fontSize:11.5, wordBreak:"break-all", lineHeight:1.5}}>{resolved}</div></div>
+      <div className="field"><label className="field-label">{isChijie ? "Remote request" : "Resolved username"}</label>
+        <div className="mono" style={{padding:"10px 12px", background:"var(--bg-2)", border:"1px solid var(--line-2)", borderRadius:6, fontSize:11.5, wordBreak:"break-all", lineHeight:1.5}}>{isChijie ? "POST /proxy · least-latency" : resolved}</div></div>
       <button className="btn primary" disabled={busy} onClick={async () => {
         setBusy(true); setResult(null);
         const out = await dispatch({type:"testTemplate", pool: tpl.name, region, url: target});
@@ -380,7 +384,7 @@ function TemplateTest({ tpl, dispatch }) {
             <div className="k">Test URL</div><div className="v mono" style={{fontSize:11, wordBreak:"break-all", lineHeight:1.5}}>{result.test_url || target}</div>
             <div className="k">Phase</div><div className="v mono">{phaseLabel}</div>
             <div className="k">HTTP</div><div className="v mono">{result.http_status || "—"}</div>
-            <div className="k">Username</div><div className="v mono" style={{fontSize:11, wordBreak:"break-all", lineHeight:1.5}}>{result.resolved_username || resolved}</div>
+            <div className="k">{isChijie ? "Remote" : "Username"}</div><div className="v mono" style={{fontSize:11, wordBreak:"break-all", lineHeight:1.5}}>{isChijie ? "Chijie /proxy" : (result.resolved_username || resolved)}</div>
             {result.error && <><div className="k">Error</div><div className="v mono" style={{fontSize:11, wordBreak:"break-all", lineHeight:1.5}}>{result.error}</div></>}
             {result.geo_error && <><div className="k">Geo error</div><div className="v mono" style={{fontSize:11, wordBreak:"break-all", lineHeight:1.5}}>{result.geo_error}</div></>}
             {hint && <><div className="k">Meaning</div><div className="v muted" style={{fontSize:11.5, lineHeight:1.5}}>{hint}</div></>}

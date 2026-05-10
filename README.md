@@ -248,7 +248,7 @@ Proxy API 调用 token 由后台生成，使用同一个 `jwt_secret` 签名，�
 | PUT | /api/nodes/subscription/node | 更新 subscription 节点地区修正、别名和标签 |
 | POST | /api/nodes/refresh?pool=xxx | 手动刷新指定订阅池 |
 | POST | /api/nodes/test | 测试节点连通性，返回出口 IP、国家码和 IP 类型信息 |
-| POST | /api/nodes/template/test | 按模板池、地区和可选测试 URL 生成临时节点并测试连通性，返回出口 IP、国家码和 IP 类型信息 |
+| POST | /api/nodes/template/test | 按模板池、地区和可选测试 URL 测试连通性；普通代理模板生成临时节点，Chijie 模板请求远端 `/proxy` |
 | POST | /api/nodes/enabled | 启用或禁用节点，并持久化到 `nodes.yaml` |
 
 #### 流量日志

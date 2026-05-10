@@ -25,7 +25,7 @@ chijie/
 │   ├── pool/
 │   │   ├── manager.go           # 节点池：静态/模板/订阅/直连池管理、地区组、家宽组、出口选择和模板优先级
 │   │   ├── subscription.go      # 订阅解析：Base64 URI 列表、Clash YAML、纯 URI 列表、Shadowsocks SIP002、多订阅地址、URL 与响应大小限制
-│   │   └── health.go            # 健康检查：按池配置后台探测节点连通性和延迟
+│   │   └── health.go            # 健康检查：按池配置后台探测节点连通性、延迟和模板即时测试
 │   ├── dialer/
 │   │   ├── dialer.go            # 统一 Dialer 接口定义、Node 结构、工厂方法
 │   │   ├── direct.go            # 直连 Dialer
@@ -54,7 +54,7 @@ chijie/
 │   │   ├── page-overview.jsx    # Overview：运行状态、节点在线数、成功率、地区组、最近成功和错误请求及详情抽屉
 │   │   ├── page-egress.jsx      # Egress：地区组、节点表、节点启停、测试、静态节点新增/删除
 │   │   ├── page-subscriptions.jsx # Subscriptions：订阅新增、刷新、启停、元数据、reject_regex 保存和窄屏订阅卡片布局
-│   │   ├── page-templates.jsx   # Templates：模板池新增、启停、删除和用户名模板预览
+│   │   ├── page-templates.jsx   # Templates：模板池新增、编辑、启停、删除、优先级、覆盖范围和按地区测试
 │   │   ├── page-tls.jsx         # TLS Profiles：指纹新增、删除、测试
 │   │   ├── page-traffic.jsx     # Traffic：请求日志、流量序列、详情抽屉、CSV 导出
 │   │   └── page-system.jsx      # System：运行统计、配置重载、日志级别保存、配置导出、Proxy token 生成

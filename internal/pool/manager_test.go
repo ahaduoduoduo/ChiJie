@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -408,6 +409,111 @@ func TestChijieTemplateRejectsHTTP(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "https") {
 		t.Fatalf("expected https-only chijie template error, got %v", err)
+	}
+}
+
+func TestTemplateConnectivityUsesRemoteChijieProxy(t *testing.T) {
+	var seen struct {
+		URL     string            `json:"url"`
+		Method  string            `json:"method"`
+		Headers map[string]string `json:"headers"`
+		Egress  struct {
+			Region      string `json:"region"`
+			Strategy    string `json:"strategy"`
+			Residential bool   `json:"residential"`
+		} `json:"egress"`
+	}
+	remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/proxy" {
+			t.Fatalf("path: got %q want /proxy", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer remote-token" {
+			t.Fatalf("authorization: got %q", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&seen); err != nil {
+			t.Fatalf("decode proxy body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer remote.Close()
+
+	oldClientFactory := newChijieTemplateHTTPClient
+	newChijieTemplateHTTPClient = func(timeout time.Duration) *http.Client {
+		client := remote.Client()
+		client.Timeout = timeout
+		return client
+	}
+	defer func() { newChijieTemplateHTTPClient = oldClientFactory }()
+
+	manager := NewManager()
+	pool, err := manager.buildPool("remote", &PoolConfig{
+		Source:       "template",
+		TemplateType: "chijie",
+		Endpoint:     remote.URL,
+		BearerToken:  "remote-token",
+		Coverage:     "both",
+	})
+	if err != nil {
+		t.Fatalf("build chijie template: %v", err)
+	}
+	manager.pools["remote"] = pool
+
+	result, err := manager.TestTemplateConnectivity("remote", "ng", "", 0)
+	if err != nil {
+		t.Fatalf("test chijie template: %v", err)
+	}
+	if !result.OK || result.TemplateType != "chijie" || result.Phase != "remote_chijie" || result.HTTPStatus != http.StatusOK {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if result.TestURL != defaultTemplateTestURL {
+		t.Fatalf("test url: got %q want %q", result.TestURL, defaultTemplateTestURL)
+	}
+	if seen.URL != defaultTemplateTestURL || seen.Method != http.MethodGet {
+		t.Fatalf("unexpected remote proxy payload: %#v", seen)
+	}
+	if seen.Egress.Region != "NG" || seen.Egress.Strategy != "least-latency" || seen.Egress.Residential {
+		t.Fatalf("unexpected remote egress payload: %#v", seen.Egress)
+	}
+}
+
+func TestTemplateConnectivityReportsRemoteChijieGatewayError(t *testing.T) {
+	remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(chijieErrorHeader, "proxy request failed")
+		http.Error(w, `{"error":"no nodes"}`, http.StatusBadGateway)
+	}))
+	defer remote.Close()
+
+	oldClientFactory := newChijieTemplateHTTPClient
+	newChijieTemplateHTTPClient = func(timeout time.Duration) *http.Client {
+		client := remote.Client()
+		client.Timeout = timeout
+		return client
+	}
+	defer func() { newChijieTemplateHTTPClient = oldClientFactory }()
+
+	manager := NewManager()
+	pool, err := manager.buildPool("remote", &PoolConfig{
+		Source:       "template",
+		TemplateType: "chijie",
+		Endpoint:     remote.URL,
+		BearerToken:  "remote-token",
+		Coverage:     "both",
+	})
+	if err != nil {
+		t.Fatalf("build chijie template: %v", err)
+	}
+	manager.pools["remote"] = pool
+
+	result, err := manager.TestTemplateConnectivity("remote", "US", "https://api.ipify.org?format=json", 0)
+	if err != nil {
+		t.Fatalf("test chijie template: %v", err)
+	}
+	if result.OK {
+		t.Fatalf("expected remote chijie gateway error, got %#v", result)
+	}
+	if result.HTTPStatus != http.StatusBadGateway || !strings.Contains(result.Error, "no nodes") {
+		t.Fatalf("unexpected remote error result: %#v", result)
 	}
 }
 

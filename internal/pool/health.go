@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -69,10 +70,25 @@ type TemplateTestResult struct {
 	connectivityCommon
 	Region           string        `json:"region"`
 	Residential      bool          `json:"residential"`
+	TemplateType     string        `json:"template_type,omitempty"`
 	Enabled          bool          `json:"enabled"`
 	Latency          time.Duration `json:"-"`
 	LatencyMS        int64         `json:"latency_ms"`
 	ResolvedUsername string        `json:"resolved_username,omitempty"`
+}
+
+const (
+	defaultTemplateTestURL = "https://api.ipify.org?format=json"
+	chijieErrorHeader      = "X-Chijie-Error"
+)
+
+var newChijieTemplateHTTPClient = func(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 // NewHealthChecker 创建健康检查器
@@ -632,6 +648,10 @@ func (m *Manager) TestTemplateConnectivity(poolName, region, testURL string, tim
 	enabled := poolEnabled(nodePool.Config)
 	m.mu.RUnlock()
 
+	if NormalizeTemplateType(cfg.TemplateType) == "chijie" {
+		return testChijieTemplateConnectivity(poolName, region, &cfg, enabled, testURL, timeout)
+	}
+
 	d, err := m.buildTemplateDialer(poolName, &cfg, region)
 	if err != nil {
 		return nil, err
@@ -657,6 +677,7 @@ func (m *Manager) TestTemplateConnectivity(poolName, region, testURL string, tim
 		},
 		Region:           region,
 		Residential:      cfg.Residential,
+		TemplateType:     "proxy",
 		Enabled:          enabled,
 		Latency:          probe.Latency,
 		LatencyMS:        probe.Latency.Milliseconds(),
@@ -665,6 +686,103 @@ func (m *Manager) TestTemplateConnectivity(poolName, region, testURL string, tim
 	if probe.Error != nil {
 		result.Error = probe.Error.Error()
 	}
+	if result.ObservedIP != "" {
+		if info, geoErr := lookupIPInfo(result.ObservedIP, timeout); geoErr != nil {
+			result.GeoError = geoErr.Error()
+		} else {
+			applyIPInfo(&result.connectivityCommon, info)
+		}
+	}
+	return result, nil
+}
+
+func testChijieTemplateConnectivity(poolName, region string, cfg *PoolConfig, enabled bool, testURL string, timeout time.Duration) (*TemplateTestResult, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("template config is required")
+	}
+	endpoint, err := ChijieProxyURL(cfg.Endpoint, cfg.Port)
+	if err != nil {
+		return nil, err
+	}
+	bearer := strings.TrimSpace(cfg.BearerToken)
+	if bearer == "" {
+		return nil, fmt.Errorf("chijie template bearer_token is required")
+	}
+	if testURL == "" {
+		testURL = defaultTemplateTestURL
+	}
+	if timeout == 0 {
+		timeout = 15 * time.Second
+	}
+
+	residential := NormalizeTemplateCoverage(cfg.Coverage, cfg.Residential, cfg.TemplateType) == "residential"
+	payload := map[string]any{
+		"url":    testURL,
+		"method": http.MethodGet,
+		"headers": map[string]string{
+			"Accept": "application/json",
+		},
+		"egress": map[string]any{
+			"region":      region,
+			"strategy":    "least-latency",
+			"residential": residential,
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal chijie template test request: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create chijie template test request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	nodeName := fmt.Sprintf("%s-%s", poolName, strings.ToLower(region))
+	result := &TemplateTestResult{
+		connectivityCommon: connectivityCommon{
+			Pool:    poolName,
+			Node:    nodeName,
+			TestURL: testURL,
+			Phase:   "remote_chijie",
+		},
+		Region:       region,
+		Residential:  residential,
+		TemplateType: "chijie",
+		Enabled:      enabled,
+	}
+
+	start := time.Now()
+	resp, err := newChijieTemplateHTTPClient(timeout).Do(req)
+	result.Latency = time.Since(start)
+	result.LatencyMS = result.Latency.Milliseconds()
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	defer resp.Body.Close()
+
+	result.HTTPStatus = resp.StatusCode
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if readErr != nil {
+		result.Error = readErr.Error()
+		return result, nil
+	}
+	result.ObservedIP = extractObservedIP(respBody)
+	if code := strings.TrimSpace(resp.Header.Get(chijieErrorHeader)); code != "" {
+		detail := strings.TrimSpace(string(respBody))
+		if detail == "" {
+			detail = code
+		}
+		result.Error = detail
+		return result, nil
+	}
+	result.OK = true
 	if result.ObservedIP != "" {
 		if info, geoErr := lookupIPInfo(result.ObservedIP, timeout); geoErr != nil {
 			result.GeoError = geoErr.Error()

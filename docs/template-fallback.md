@@ -61,6 +61,15 @@ node_pools:
 5. Chijie 模板返回网关错误时尝试下一个模板。
 6. 目标站点已经返回 HTTP 状态码时不尝试下一个模板。
 
+## 测试行为
+
+Admin 的 `Test region` 按钮使用同一个接口：
+
+- 普通代理模板：本机按地区生成临时代理节点后访问测试 URL。
+- Chijie 模板：本机向远端 Chijie 的 `/proxy` 发起测试请求，`egress.region` 使用界面输入的地区，`strategy` 固定为 `least-latency`，默认测试 URL 为 `https://api.ipify.org?format=json`。
+
+Chijie 模板测试只替换远端 Bearer，不会使用 Admin token。
+
 ## 循环保护
 
 Chijie 之间转发会添加 `X-Chijie-Hop` 请求头。超过最大跳数时返回 `508`，避免 A 和 B 互相配置后无限转发。

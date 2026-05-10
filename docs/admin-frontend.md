@@ -16,7 +16,7 @@
 - `GET /api/stats`：运行时长、节点池数量、指纹数量和流量指标。
 - `PUT /api/system/logging`：修改日志级别，并写入 `gateway.yaml`。
 - `GET /api/config/export`：导出当前配置目录里的 YAML 配置快照。
-- `POST /api/nodes/template/test`：按模板池、地区和可选测试 URL 生成临时节点并即时探测连通性，返回阶段、HTTP 状态、出口 IP、实际国家码、IP 类型、ASN/ISP 信息和错误文本。
+- `POST /api/nodes/template/test`：按模板池、地区和可选测试 URL 即时探测连通性。普通代理模板会生成临时节点；Chijie 模板会请求远端 `/proxy`，使用 `least-latency` 和指定地区访问测试 URL。返回阶段、HTTP 状态、出口 IP、实际国家码、IP 类型、ASN/ISP 信息和错误文本。
 - `POST /api/fingerprints/test`：对 HTTPS 目标发起真实 TLS 指纹测试。
 
 前端入口 `web/src/app.jsx` 启动后读取上述接口；如果接口返回 `401`，显示登录页。JWT 存储在 `localStorage`，后续请求使用 `Authorization: Bearer <token>`。
@@ -32,7 +32,7 @@
 
 - Egress：节点启停、节点状态测试、静态节点添加、静态节点删除、metadata 编辑、状态刷新；静态节点新增表单会提交用户名和密码字段。
 - Subscriptions：订阅池新增、刷新、启停、节点地区修正、别名、标签、`reject_regex` 保存。
-- Templates：模板池新增、编辑、启停、删除、优先级和覆盖范围配置；普通代理模板支持按地区真实探测，Chijie 模板配置 HTTPS endpoint 和远端 Proxy token。
+- Templates：模板池新增、编辑、启停、删除、优先级和覆盖范围配置；普通代理模板和 Chijie 模板均支持按地区真实探测，Chijie 模板测试会通过远端 Proxy API 请求 `https://api.ipify.org?format=json`。
 - TLS Profiles：指纹新增、JSON/YAML 配置输入、删除、真实 HTTPS 指纹测试。
 - Overview：最近成功和最近错误请求可打开与 Traffic 一致的请求详情抽屉，详情时间按 UTC+8 展示。
 - Traffic：真实请求日志展示、详情抽屉、CSV 导出。
