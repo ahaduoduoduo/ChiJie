@@ -40,6 +40,8 @@ function reducer(state, action) {
         authRequired: false,
         error: "",
       };
+    case "setTraffic":
+      return { ...state, traffic: action.traffic || EMPTY_TRAFFIC };
     case "setLoading":
       return { ...state, loading: action.loading, error: action.error || state.error };
     case "setError":
@@ -231,6 +233,7 @@ function LoginScreen({ onLogin, error }) {
 function App() {
   const [state, baseDispatch] = useReducer(reducer, null, emptyState);
   const [page, setPageState] = useState(() => pageFromPath(window.location.pathname) || "overview");
+  const [trafficLimit, setTrafficLimit] = useState(200);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -244,7 +247,7 @@ function App() {
 
   const refreshData = useCallback(async (quiet = true) => {
     try {
-      const next = await window.PG_API.loadState();
+      const next = await window.PG_API.loadState({ trafficLimit });
       baseDispatch({ type: "setData", data: next });
       if (!quiet) toast("Data refreshed");
       return next;
@@ -256,7 +259,7 @@ function App() {
       }
       return null;
     }
-  }, [toast]);
+  }, [toast, trafficLimit]);
 
   useEffect(() => {
     refreshData(true);
@@ -377,6 +380,13 @@ function App() {
         }
         case "testTemplate":
           return await api.testTemplate({ pool: action.pool, region: action.region, url: action.url });
+        case "loadMoreTraffic": {
+          const nextLimit = Math.min(1000, Math.max(200, trafficLimit + 200));
+          const traffic = await api.getTraffic(nextLimit);
+          setTrafficLimit(nextLimit);
+          baseDispatch({ type: "setTraffic", traffic });
+          return traffic;
+        }
         case "addFingerprint": {
           const result = await api.addFingerprint({ name: action.name, config: action.config, configText: action.configText });
           await refreshData(true);
@@ -412,7 +422,7 @@ function App() {
     } finally {
       setBusy(false);
     }
-  }, [state.pools, refreshData, toast]);
+  }, [state.pools, trafficLimit, refreshData, toast]);
 
   const login = async (password) => {
     try {
@@ -457,7 +467,7 @@ function App() {
         {page === "subscriptions" && <window.PageSubscriptions state={state} dispatch={dispatch} />}
         {page === "templates" && <window.PageTemplates state={state} dispatch={dispatch} />}
         {page === "tls" && <window.PageTLS state={state} dispatch={dispatch} />}
-        {page === "traffic" && <window.PageTraffic state={state} />}
+        {page === "traffic" && <window.PageTraffic state={state} dispatch={dispatch} busy={busy} />}
         {page === "system" && <window.PageSystem state={state} dispatch={dispatch} />}
       </div>
     </div>

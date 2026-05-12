@@ -257,11 +257,12 @@
     };
   }
 
-  async function loadState() {
+  async function loadState(options = {}) {
+    const trafficLimit = Number(options.trafficLimit || 200);
     const [nodes, fingerprints, traffic, stats] = await Promise.all([
       request("/api/nodes"),
       request("/api/fingerprints"),
-      request("/api/traffic?limit=200"),
+      request(`/api/traffic?limit=${trafficLimit}`),
       request("/api/stats"),
     ]);
     const pools = (nodes.pools || []).map(normalizePool);

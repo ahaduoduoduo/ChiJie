@@ -317,3 +317,10 @@
 - [x] 同地区家宽节点不可用时，继续尝试家宽模板
 - [x] Traffic 记录实际使用的 `*-RES` 组和 `residential=true`
 - [x] 远端 Chijie 模板 fallback 时同步修正转发请求的 `egress.residential`
+
+## P30 — Traffic Request log 加载更多 ✅
+日期：2026-05-12
+
+- [x] Traffic 页面支持按 200 条递增加载更多请求日志
+- [x] 最高展示后端内存窗口中的最近 1000 条
+- [x] 保持后端内存存储模型不变

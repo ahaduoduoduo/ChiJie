@@ -12,7 +12,7 @@
 - `POST /api/auth/proxy-token`：生成只用于代理调用的 Bearer token。
 - `GET /api/nodes`：节点池、节点状态、地区组状态。
 - `GET /api/fingerprints`：TLS 指纹列表。
-- `GET /api/traffic?limit=200`：请求日志、分钟级序列和聚合指标。
+- `GET /api/traffic?limit=200`：请求日志、分钟级序列和聚合指标；Traffic 页面可加载更多，最高展示内存窗口中的最近 1000 条。
 - `GET /api/stats`：运行时长、节点池数量、指纹数量和流量指标。
 - `PUT /api/system/logging`：修改日志级别，并写入 `gateway.yaml`。
 - `GET /api/config/export`：导出当前配置目录里的 YAML 配置快照。

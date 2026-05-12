@@ -1,7 +1,7 @@
 // Traffic — request log + drawer
 const { Drawer, Seg, RegionPill, StatusCode, RequestDetailContent, fmtBytes, fmtAgo, BarChart, Sparkline } = window.UI;
 
-function PageTraffic({ state }) {
+function PageTraffic({ state, dispatch, busy }) {
   const { traffic } = state;
   const [filter, setFilter] = React.useState("all");
   const [search, setSearch] = React.useState("");
@@ -19,6 +19,7 @@ function PageTraffic({ state }) {
   });
 
   const total = traffic.requests.length;
+  const canLoadMore = total > 0 && total < 1000 && total % 200 === 0;
   const errs = traffic.requests.filter(r => r.status === 0 || r.status >= 400).length;
   const tunnels = traffic.requests.filter(r => r.type === "tunnel").length;
   const exportCSV = () => {
@@ -112,6 +113,12 @@ function PageTraffic({ state }) {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="row" style={{justifyContent:"center", padding:"16px", borderTop:"1px solid var(--line-1)"}}>
+          <button className="btn" disabled={busy || !canLoadMore} onClick={() => dispatch?.({type:"loadMoreTraffic"})}>
+            <Ic.plus/> {total >= 1000 ? "Loaded 1000" : canLoadMore ? "Load more" : "All loaded"}
+          </button>
+          <span className="muted-2 mono" style={{fontSize:11}}>memory window max 1000</span>
         </div>
       </div>
 
