@@ -23,7 +23,7 @@ chijie/
 │   │   ├── strings.go           # 跨模块共享的字符串工具：FirstNonEmpty / ContainsString / RemoveString / ParseInt / SplitList
 │   │   └── logger.go            # 日志分级：Debugf / Infof / Warnf / Errorf，受 log.level 控制
 │   ├── pool/
-│   │   ├── manager.go           # 节点池：静态/模板/订阅/直连池管理、地区组、家宽组、出口选择和模板优先级
+│   │   ├── manager.go           # 节点池：静态/模板/订阅/直连池管理、地区组、家宽组、出口选择、模板优先级和家宽降级
 │   │   ├── subscription.go      # 订阅解析：Base64 URI 列表、Clash YAML、纯 URI 列表、Shadowsocks SIP002、多订阅地址、URL 与响应大小限制
 │   │   └── health.go            # 健康检查：按池配置后台探测节点连通性、延迟和模板即时测试
 │   ├── dialer/

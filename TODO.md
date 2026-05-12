@@ -309,3 +309,11 @@
 - [x] Region pill 对任意 ISO-2 地区码自动生成 flag emoji
 - [x] `UK` 兼容显示为 `GB` 旗帜
 - [x] 保留 `UN` 的兜底白旗显示
+
+## P29 — 普通地区出口降级到同地区家宽 ✅
+日期：2026-05-12
+
+- [x] `residential=false` 请求在普通节点和普通模板均不可用时，尝试同地区家宽节点
+- [x] 同地区家宽节点不可用时，继续尝试家宽模板
+- [x] Traffic 记录实际使用的 `*-RES` 组和 `residential=true`
+- [x] 远端 Chijie 模板 fallback 时同步修正转发请求的 `egress.residential`

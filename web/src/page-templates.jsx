@@ -28,7 +28,7 @@ function PageTemplates({ state, dispatch }) {
       <div className="page-h">
         <div>
           <h1>Templates</h1>
-          <p>Generate per-region accounts on demand. Templates serve any 2-letter region as fallback, never mixing normal and residential traffic.</p>
+          <p>Generate per-region accounts on demand. Templates serve any 2-letter region as fallback, with residential used only when requested or when normal coverage is unavailable.</p>
         </div>
         <div className="page-h-actions">
           <button className="btn primary" onClick={() => setAddOpen(true)}><Ic.plus/> Add template</button>

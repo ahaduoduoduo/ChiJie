@@ -239,7 +239,8 @@ func (m *Manager) SelectEgress(region string, strategy string, residential bool)
 	return choices[0], nil
 }
 
-// SelectEgressCandidates 返回按策略排序后的出口候选。普通节点优先，模板节点仅在普通节点为空时作为兜底。
+// SelectEgressCandidates 返回按策略排序后的出口候选。请求普通出口时，如果普通节点和模板都不可用，
+// 会降级到同地区家宽节点或家宽模板。
 func (m *Manager) SelectEgressCandidates(region string, strategy string, residential bool) ([]*EgressChoice, error) {
 	region = NormalizeRegionCode(region)
 	if region == "" {
@@ -252,6 +253,15 @@ func (m *Manager) SelectEgressCandidates(region string, strategy string, residen
 	}
 	if choices := m.templateChoices(region, residential); len(choices) > 0 {
 		return choices, nil
+	}
+
+	if !residential {
+		if choices := m.orderEgressChoices(m.entryChoices(region, true), strategy, EgressGroup(region, true)); len(choices) > 0 {
+			return choices, nil
+		}
+		if choices := m.templateChoices(region, true); len(choices) > 0 {
+			return choices, nil
+		}
 	}
 
 	if residential {

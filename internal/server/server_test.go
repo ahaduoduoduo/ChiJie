@@ -87,6 +87,38 @@ func TestResolveEgressEmptyRegionUsesDirect(t *testing.T) {
 	}
 }
 
+func TestResolveEgressUsesResidentialFallbackRoute(t *testing.T) {
+	dir := t.TempDir()
+	nodesPath := filepath.Join(dir, "nodes.yaml")
+	data := []byte(`
+node_pools:
+  primary:
+    source: static
+    nodes:
+      - name: mo-res
+        type: direct
+        region: MO
+        residential: true
+`)
+	if err := os.WriteFile(nodesPath, data, 0644); err != nil {
+		t.Fatalf("write nodes: %v", err)
+	}
+
+	manager := pool.NewManager()
+	if err := manager.LoadFromFile(nodesPath); err != nil {
+		t.Fatalf("load nodes: %v", err)
+	}
+
+	s := &Server{poolManager: manager}
+	route, err := s.resolveEgress(EgressOptions{Region: "MO", Strategy: "random", Residential: false})
+	if err != nil {
+		t.Fatalf("resolve egress with residential fallback: %v", err)
+	}
+	if route.Group != "MO-RES" || !route.Residential || route.Choice == nil || route.Choice.NodeName != "mo-res" {
+		t.Fatalf("unexpected residential fallback route: %#v", route)
+	}
+}
+
 func TestResolveEgressAnyUsesLatencyLimitedNode(t *testing.T) {
 	dir := t.TempDir()
 	nodesPath := filepath.Join(dir, "nodes.yaml")
@@ -279,10 +311,11 @@ func TestRemoteChijieTemplateForwardsRequestWithBearerAndHop(t *testing.T) {
 	defer remote.Close()
 
 	route := &egressRoute{
-		Region: "NG",
-		Group:  "NG",
+		Region:      "NG",
+		Group:       "NG-RES",
+		Residential: true,
 		Choices: []*pool.EgressChoice{
-			{PoolName: "chijie-b", NodeName: "chijie-b-ng", Source: "template", Template: true, TemplateType: "chijie", Region: "NG", Group: "NG", Endpoint: remote.URL, BearerToken: "remote-token"},
+			{PoolName: "chijie-b", NodeName: "chijie-b-ng", Source: "template", Template: true, TemplateType: "chijie", Region: "NG", Group: "NG-RES", Residential: true, Endpoint: remote.URL, BearerToken: "remote-token"},
 		},
 	}
 	req := &ProxyRequest{
@@ -307,7 +340,7 @@ func TestRemoteChijieTemplateForwardsRequestWithBearerAndHop(t *testing.T) {
 	if seen.URL != req.URL || seen.Method != req.Method || seen.Payload != req.Payload || seen.Headers["X-Test"] != "yes" {
 		t.Fatalf("request was not forwarded as proxy payload: %#v", seen)
 	}
-	if seen.Egress.Region != "NG" || seen.Egress.Strategy != "least-latency" {
+	if seen.Egress.Region != "NG" || seen.Egress.Strategy != "least-latency" || !seen.Egress.Residential {
 		t.Fatalf("egress was not forwarded: %#v", seen.Egress)
 	}
 }

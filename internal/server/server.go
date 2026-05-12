@@ -388,6 +388,7 @@ func proxyAttemptRoutes(route *egressRoute, maxAttempts int) []*egressRoute {
 		attemptRoute.Choice = choice
 		attemptRoute.Region = choice.Region
 		attemptRoute.Group = choice.Group
+		attemptRoute.Residential = choice.Residential
 		routes = append(routes, &attemptRoute)
 	}
 	return routes
@@ -527,7 +528,18 @@ func (s *Server) doRemoteChijieProxy(ctx context.Context, req *ProxyRequest, rou
 		return nil, "", 0, &proxyAttemptError{err: fmt.Errorf("remote chijie %s endpoint: %w", routeAttemptName(route), err)}
 	}
 
-	body, err := json.Marshal(req)
+	forwardReq := *req
+	if route.Region != "" {
+		forwardReq.Egress.Region = route.Region
+	}
+	if route.Strategy != "" {
+		forwardReq.Egress.Strategy = route.Strategy
+	}
+	forwardReq.Egress.Residential = route.Residential || (route.Choice != nil && route.Choice.Residential)
+	if route.TLSFingerprint != "" {
+		forwardReq.Egress.TLSFingerprint = route.TLSFingerprint
+	}
+	body, err := json.Marshal(&forwardReq)
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("marshal remote chijie request: %w", err)
 	}
@@ -699,12 +711,17 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 		return nil, err
 	}
 	choice := choices[0]
+	routeResidential := choice.Residential
+	routeGroup := choice.Group
+	if routeGroup == "" {
+		routeGroup = pool.EgressGroup(region, routeResidential)
+	}
 
 	return &egressRoute{
 		Region:         region,
-		Group:          pool.EgressGroup(region, options.Residential),
+		Group:          routeGroup,
 		Strategy:       strategy,
-		Residential:    options.Residential,
+		Residential:    routeResidential,
 		TLSFingerprint: fingerprintValue,
 		Choice:         choice,
 		Choices:        choices,

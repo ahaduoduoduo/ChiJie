@@ -11,7 +11,7 @@
 - 地区组：普通地区组使用 `US` / `HK` / `JP`，家宽地区组使用 `US-RES` / `HK-RES`
 - 出口策略：`random`、`round-robin`、`least-latency`
 - 模板节点：支持 Bright Data 这类按地区动态生成账号的出口，可作为地区兜底或冷门地区动态出口
-- 家宽模板：通过 `residential: true` 单独声明，只服务家宽请求
+- 家宽模板：通过 `residential: true` 单独声明，服务家宽请求；普通请求没有同地区普通出口时可降级使用同地区家宽出口
 - 健康检查：后台探测节点连通性和延迟，供可用性判断和 `least-latency` 使用
 - TLS 指纹：支持内置预设、自定义 JA3、配置文件指纹名称和请求级字符串
 - Admin API：管理节点池、订阅刷新、TLS 指纹、流量日志和系统重载
@@ -171,11 +171,12 @@ Content-Type: application/json
 5. `residential=true` 查找家宽地区组，例如 `US-RES`。
 6. 地区组内存在可用静态节点或订阅节点时，按 `strategy` 选择节点。
 7. 地区组内没有可用节点时，使用同类型模板节点生成出口；模板按 `priority` 从高到低尝试。
-8. 没有可用节点也没有同类型模板时返回错误。
+8. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板。
+9. 没有可用节点也没有可用模板时返回错误。
 
 任意地区出口不会使用 `direct`、`type: direct` 静态节点或模板节点，因为模板节点需要明确地区码来生成代理账号。
 
-模板节点默认支持任意二字母地区码，不支持家宽。家宽模板需要单独配置 `residential: true`。
+模板节点默认支持任意二字母地区码。家宽模板需要单独配置 `residential: true` 或 `coverage: residential`；`coverage: both` 可同时覆盖普通和家宽请求。
 
 ## WebSocket 隧道
 

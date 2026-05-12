@@ -191,6 +191,28 @@ func TestSelectEgressSeparatesResidentialGroups(t *testing.T) {
 	}
 }
 
+func TestSelectEgressFallsBackToResidentialRegionWhenNormalUnavailable(t *testing.T) {
+	manager := NewManager()
+	pool, err := manager.buildPool("subscription", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "mo-res", Type: "direct", Region: "MO", Residential: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	manager.pools["subscription"] = pool
+
+	choice, err := manager.SelectEgress("MO", "random", false)
+	if err != nil {
+		t.Fatalf("select fallback residential node: %v", err)
+	}
+	if choice.NodeName != "mo-res" || choice.Group != "MO-RES" || !choice.Residential {
+		t.Fatalf("unexpected residential fallback choice: %#v", choice)
+	}
+}
+
 func TestSelectEgressRoundRobinAcrossPools(t *testing.T) {
 	manager := NewManager()
 

@@ -87,7 +87,7 @@ Content-Type: application/json
 | `egress.any` | boolean | 否 | 为 `true` 时选择任意非直连出口 |
 | `egress.max_latency_ms` | number | 否 | 配合 `any=true` 使用，按最近健康检查延迟过滤候选出口 |
 | `egress.strategy` | string | 否 | `random`、`round-robin`、`least-latency`，默认 `random` |
-| `egress.residential` | boolean | 否 | 是否要求家宽出口 |
+| `egress.residential` | boolean | 否 | 是否要求家宽出口；为 `false` 时优先普通出口，普通出口不可用时可降级使用同地区家宽出口 |
 | `egress.tls_fingerprint` | string | 否 | TLS 指纹名称或指纹配置字符串，例如 `chrome` |
 
 地区码会标准化为大写二字母代码。英国使用标准码 `GB`；传入 `UK` 时也会归一为 `GB`。
