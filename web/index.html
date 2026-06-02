@@ -509,18 +509,33 @@
   .drawer {
     position: fixed; top: 0; right: 0; bottom: 0;
     width: min(480px, 92vw); background: var(--bg-1);
+    max-width: 100vw;
     border-left: 1px solid var(--line-2);
     z-index: 91;
     display: flex; flex-direction: column;
     animation: slide 320ms var(--ease);
     box-shadow: -32px 0 64px rgba(0,0,0,0.4);
+    overflow-x: hidden;
   }
   @keyframes slide { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
   .drawer-h { padding: 22px 28px; display: flex; align-items: center; gap: 12px; }
-  .drawer-body { padding: 4px 28px 28px; overflow-y: auto; flex: 1; }
-  .kv { display: grid; grid-template-columns: 132px 1fr; gap: 10px 20px; align-items: center; }
+  .drawer-body { padding: 4px 28px 28px; overflow-y: auto; overflow-x: hidden; flex: 1; min-width: 0; }
+  .kv { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 10px 20px; align-items: center; min-width: 0; }
   .kv .k { color: var(--fg-3); font-size: 12px; font-weight: 450; }
-  .kv .v { color: var(--fg-0); font-size: 12.5px; }
+  .kv .v { color: var(--fg-0); font-size: 12.5px; min-width: 0; }
+  .request-detail { max-width: 100%; min-width: 0; overflow: hidden; }
+  .request-detail .kv .v {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.5;
+  }
+  .request-replay {
+    max-width: 100%;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
 
   /* Toast */
   .toast-stack {

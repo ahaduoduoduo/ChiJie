@@ -180,7 +180,7 @@ function RequestDetailContent({ request }) {
   if (!request) return null;
   const replayRegion = request.region || (request.group || "").replace(/-RES$/, "");
   return (
-    <>
+    <div className="request-detail">
       <div className="row" style={{gap:8, flexWrap:"wrap", marginBottom:24}}>
         <span className="pill mono"><StatusCode code={request.status}/></span>
         <span className="pill mono">{request.method}</span>
@@ -201,7 +201,7 @@ function RequestDetailContent({ request }) {
       </div>
       <div className="sep-h"/>
       <div className="muted-2" style={{fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10, fontWeight:500}}>Replay payload</div>
-      <pre className="mono" style={{margin:0, padding:14, background:"var(--bg-2)", border:"1px solid var(--line-2)", borderRadius:6, fontSize:11.5, overflow:"auto", lineHeight:1.55, color:"var(--fg-1)"}}>{`POST /proxy
+      <pre className="mono request-replay" style={{margin:0, padding:14, background:"var(--bg-2)", border:"1px solid var(--line-2)", borderRadius:6, fontSize:11.5, overflow:"auto", lineHeight:1.55, color:"var(--fg-1)"}}>{`POST /proxy
 Authorization: Bearer <proxy_token>
 
 {
@@ -214,7 +214,7 @@ Authorization: Bearer <proxy_token>
     "tls_fingerprint": "${request.tls}"
   }
 }`}</pre>
-    </>
+    </div>
   );
 }
 
