@@ -17,9 +17,11 @@ import (
 	sbconstant "github.com/sagernet/sing-box/constant"
 	sblog "github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	sbanytls "github.com/sagernet/sing-box/protocol/anytls"
 	sbhysteria2 "github.com/sagernet/sing-box/protocol/hysteria2"
 	sbshadowsocks "github.com/sagernet/sing-box/protocol/shadowsocks"
 	sbtrojan "github.com/sagernet/sing-box/protocol/trojan"
+	sbtuic "github.com/sagernet/sing-box/protocol/tuic"
 	sbvless "github.com/sagernet/sing-box/protocol/vless"
 	sbvmess "github.com/sagernet/sing-box/protocol/vmess"
 	singjson "github.com/sagernet/sing/common/json"
@@ -145,6 +147,18 @@ func buildSingBoxOutbound(ctx context.Context, logger sblog.ContextLogger, tag s
 			return nil, err
 		}
 		return sbhysteria2.NewOutbound(ctx, nil, logger, tag, options)
+	case "anytls":
+		var options option.AnyTLSOutboundOptions
+		if err := decodeSingBoxOptions(buildAnyTLSOptions(node), &options); err != nil {
+			return nil, err
+		}
+		return sbanytls.NewOutbound(ctx, nil, logger, tag, options)
+	case "tuic":
+		var options option.TUICOutboundOptions
+		if err := decodeSingBoxOptions(buildTUICOptions(node), &options); err != nil {
+			return nil, err
+		}
+		return sbtuic.NewOutbound(ctx, nil, logger, tag, options)
 	default:
 		return nil, fmt.Errorf("unsupported sing-box node type: %s", node.Type)
 	}
@@ -237,6 +251,48 @@ func buildHysteria2Options(node *Node) map[string]any {
 	return options
 }
 
+func buildAnyTLSOptions(node *Node) map[string]any {
+	options := buildBaseOptions(node)
+	options["password"] = util.FirstNonEmpty(node.Password, node.Extra["password"], node.Username)
+	if interval := node.Extra["idle_session_check_interval"]; interval != "" {
+		options["idle_session_check_interval"] = interval
+	}
+	if timeout := node.Extra["idle_session_timeout"]; timeout != "" {
+		options["idle_session_timeout"] = timeout
+	}
+	if minIdleSession := util.ParseInt(node.Extra["min_idle_session"]); minIdleSession > 0 {
+		options["min_idle_session"] = minIdleSession
+	}
+	options["tls"] = buildTLSOptions(node, true)
+	return options
+}
+
+func buildTUICOptions(node *Node) map[string]any {
+	options := buildBaseOptions(node)
+	options["uuid"] = util.FirstNonEmpty(node.Extra["uuid"], node.Username)
+	options["password"] = util.FirstNonEmpty(node.Password, node.Extra["password"])
+	if congestionControl := util.FirstNonEmpty(node.Extra["congestion_control"], node.Extra["congestion-control"]); congestionControl != "" {
+		options["congestion_control"] = congestionControl
+	}
+	if udpRelayMode := util.FirstNonEmpty(node.Extra["udp_relay_mode"], node.Extra["udp-relay-mode"]); udpRelayMode != "" {
+		options["udp_relay_mode"] = udpRelayMode
+	}
+	if truthy(util.FirstNonEmpty(node.Extra["udp_over_stream"], node.Extra["udp-over-stream"])) {
+		options["udp_over_stream"] = true
+	}
+	if truthy(util.FirstNonEmpty(node.Extra["zero_rtt_handshake"], node.Extra["zero-rtt-handshake"], node.Extra["reduce_rtt"], node.Extra["reduce-rtt"])) {
+		options["zero_rtt_handshake"] = true
+	}
+	if heartbeat := util.FirstNonEmpty(node.Extra["heartbeat"], node.Extra["heartbeat_interval"], node.Extra["heartbeat-interval"]); heartbeat != "" {
+		options["heartbeat"] = heartbeat
+	}
+	if network := node.Extra["network"]; network != "" {
+		options["network"] = util.SplitList(network)
+	}
+	options["tls"] = buildTLSOptions(node, true)
+	return options
+}
+
 func attachTLSAndTransport(options map[string]any, node *Node, defaultTLS bool) {
 	if tlsOptions := buildTLSOptions(node, defaultTLS); tlsOptions != nil {
 		options["tls"] = tlsOptions
@@ -269,7 +325,15 @@ func buildTLSOptions(node *Node, defaultEnabled bool) map[string]any {
 	if serverName != "" {
 		tlsOptions["server_name"] = serverName
 	}
-	if truthy(util.FirstNonEmpty(node.Extra["insecure"], node.Extra["allowInsecure"], node.Extra["skip_verify"], node.Extra["skip-cert-verify"])) {
+	if truthy(util.FirstNonEmpty(
+		node.Extra["insecure"],
+		node.Extra["allowInsecure"],
+		node.Extra["allow_insecure"],
+		node.Extra["allow-insecure"],
+		node.Extra["skip_verify"],
+		node.Extra["skip-cert-verify"],
+		node.Extra["skip_cert_verify"],
+	)) {
 		tlsOptions["insecure"] = true
 	}
 	if alpn := util.FirstNonEmpty(node.Extra["alpn"], node.Extra["alpns"]); alpn != "" {

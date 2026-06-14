@@ -331,3 +331,11 @@
 - [x] 请求详情抽屉限制自身和内容区横向宽度，避免长文本撑开抽屉
 - [x] 两列详情布局右侧内容列使用 `minmax(0, 1fr)` 和 `min-width: 0`
 - [x] URL、Node、Error 和 replay payload 使用断行策略，错误请求不再因连续长字符串溢出
+
+## P32 — AnyTLS / TUIC 订阅导入兼容 ✅
+日期：2026-06-14
+
+- [x] Base64 TXT 订阅入口复用弹性 Base64 解码，支持 URL-safe 和无 padding 编码
+- [x] URI 订阅新增 `anytls://` 和 `tuic://` 解析
+- [x] 出口拨号新增 sing-box AnyTLS 和 TUIC outbound
+- [x] 补充订阅解析和拨号器单元测试

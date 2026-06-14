@@ -70,6 +70,30 @@ func TestNewSingBoxDialerSupportsCommonProtocols(t *testing.T) {
 				"down_mbps":     "100",
 			},
 		},
+		{
+			Name:     "anytls-node",
+			Type:     "anytls",
+			Server:   "any.example.com",
+			Port:     443,
+			Password: "any-pass",
+			Extra: map[string]string{
+				"sni": "any.example.com",
+			},
+		},
+		{
+			Name:     "tuic-node",
+			Type:     "tuic",
+			Server:   "tuic.example.com",
+			Port:     443,
+			Password: "tuic-pass",
+			Extra: map[string]string{
+				"uuid":               "11111111-1111-1111-1111-111111111111",
+				"sni":                "tuic.example.com",
+				"congestion_control": "bbr",
+				"udp_relay_mode":     "native",
+				"alpn":               "h3",
+			},
+		},
 	}
 
 	for _, node := range nodes {

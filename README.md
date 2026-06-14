@@ -115,10 +115,12 @@ Docker Hub 自动发布详见 [docs/dockerhub-release.md](docs/dockerhub-release
 - `vless`
 - `trojan`
 - `hysteria2` / `hy2`
+- `anytls`
+- `tuic`
 
-`vmess` / `vless` / `trojan` 支持常见 V2Ray 传输参数：TCP、WebSocket、gRPC、HTTP/H2、HTTPUpgrade、QUIC。`vless` 支持 TLS 和 Reality；Reality 和订阅中的 `fp/client-fingerprint` 需要使用 `-tags with_utls` 构建，`./build.sh` 已默认启用。
+`vmess` / `vless` / `trojan` 支持常见 V2Ray 传输参数：TCP、WebSocket、gRPC、HTTP/H2、HTTPUpgrade、QUIC。`vless` 支持 TLS 和 Reality；`anytls` / `tuic` 使用 sing-box outbound 并默认启用 TLS。Reality 和订阅中的 `fp/client-fingerprint` 需要使用 `-tags with_utls` 构建，`./build.sh` 已默认启用。
 
-订阅导入支持 Clash YAML、Base64 URI 列表、未 Base64 包装的纯 URI 列表。Shadowsocks URI 支持 `ss://userinfo@host:port?plugin=...` 和 SIP002 常见的 `ss://userinfo@host:port/?plugin=...` 写法；`simple-obfs` 插件名会规范化为 sing-box 可识别的 `obfs-local`。单个订阅池可填写多个订阅地址，使用换行、英文逗号或 `|` 分隔；部分订阅地址失败时，已成功解析的节点仍会进入该池。订阅地址必须是 `http` / `https` 公网目标，响应体超过 4 MB 时会拒绝解析。
+订阅导入支持 Clash YAML、Base64 URI 列表、未 Base64 包装的纯 URI 列表。URI 列表支持 `ss`、`vmess`、`vless`、`trojan`、`hysteria2` / `hy2`、`anytls` 和 `tuic`。Shadowsocks URI 支持 `ss://userinfo@host:port?plugin=...` 和 SIP002 常见的 `ss://userinfo@host:port/?plugin=...` 写法；`simple-obfs` 插件名会规范化为 sing-box 可识别的 `obfs-local`。单个订阅池可填写多个订阅地址，使用换行、英文逗号或 `|` 分隔；部分订阅地址失败时，已成功解析的节点仍会进入该池。订阅地址必须是 `http` / `https` 公网目标，响应体超过 4 MB 时会拒绝解析。
 
 ## 请求协议
 

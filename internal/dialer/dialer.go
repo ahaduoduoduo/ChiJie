@@ -22,7 +22,7 @@ type Dialer interface {
 // Node 节点配置
 type Node struct {
 	Name        string            `yaml:"name" json:"name"`
-	Type        string            `yaml:"type" json:"type"` // direct, socks5, http_proxy, ss, vmess, trojan, vless, hysteria2
+	Type        string            `yaml:"type" json:"type"` // direct, socks5, http_proxy, ss, vmess, trojan, vless, hysteria2, anytls, tuic
 	Server      string            `yaml:"server" json:"server"`
 	Port        int               `yaml:"port" json:"port"`
 	Region      string            `yaml:"region,omitempty" json:"region,omitempty"`
@@ -43,7 +43,7 @@ func NewDialer(node *Node) (Dialer, error) {
 		return NewSOCKS5Dialer(node)
 	case "http_proxy", "http":
 		return NewHTTPProxyDialer(node)
-	case "ss", "shadowsocks", "vmess", "vless", "trojan", "hysteria2", "hy2":
+	case "ss", "shadowsocks", "vmess", "vless", "trojan", "hysteria2", "hy2", "anytls", "tuic":
 		return NewSingBoxDialer(node)
 	default:
 		return nil, fmt.Errorf("unsupported node type: %s", node.Type)

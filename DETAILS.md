@@ -160,8 +160,10 @@ WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读�
 - `vless`：VLESS。
 - `trojan`：Trojan。
 - `hysteria2` / `hy2`：Hysteria2。
+- `anytls`：AnyTLS。
+- `tuic`：TUIC。
 
-Reality 和代理侧 uTLS 指纹依赖 `with_utls` 构建标签，`build.sh` 默认使用 `go build -tags with_utls`。
+Reality、AnyTLS / TUIC 代理侧 uTLS 指纹依赖 `with_utls` 构建标签，`build.sh` 默认使用 `go build -tags with_utls`。
 
 ### fingerprint（TLS 指纹）
 

@@ -124,20 +124,12 @@ func (p *SubscriptionParser) fetchOne(subURL string) ([]dialer.Node, error) {
 	}
 
 	// 尝试 Base64 解码
-	decoded, err := base64.StdEncoding.DecodeString(content)
+	decoded, err := decodeBase64Flexible(content)
 	if err != nil {
-		// 尝试 URL-safe Base64
-		decoded, err = base64.URLEncoding.DecodeString(content)
-		if err != nil {
-			// 尝试无 padding 的 Base64
-			decoded, err = base64.RawStdEncoding.DecodeString(content)
-			if err != nil {
-				return nil, fmt.Errorf("cannot decode subscription: not Clash YAML or Base64")
-			}
-		}
+		return nil, fmt.Errorf("cannot decode subscription: not Clash YAML or Base64")
 	}
 
-	return p.parseURIList(string(decoded))
+	return p.parseURIList(decoded)
 }
 
 func subscriptionFetchError(raw string, err error) error {
@@ -262,6 +254,17 @@ type ClashProxy struct {
 	PluginOpts        string `yaml:"plugin-opts"`
 	Auth              string `yaml:"auth"`
 	AuthStr           string `yaml:"auth-str"`
+	CongestionControl string `yaml:"congestion-control"`
+	CongestionCtl     string `yaml:"congestion-controller"`
+	UDPRelayMode      string `yaml:"udp-relay-mode"`
+	UDPOverStream     bool   `yaml:"udp-over-stream"`
+	ZeroRTTHandshake  bool   `yaml:"zero-rtt-handshake"`
+	ReduceRTT         bool   `yaml:"reduce-rtt"`
+	Heartbeat         string `yaml:"heartbeat"`
+	HeartbeatInterval string `yaml:"heartbeat-interval"`
+	MinIdleSession    int    `yaml:"min-idle-session"`
+	IdleCheckInterval string `yaml:"idle-session-check-interval"`
+	IdleTimeout       string `yaml:"idle-session-timeout"`
 	Up                any    `yaml:"up"`
 	Down              any    `yaml:"down"`
 	Ports             any    `yaml:"ports"`
@@ -325,6 +328,31 @@ func clashProxyToNode(proxy *ClashProxy) (*dialer.Node, error) {
 		setExtra(node.Extra, "hop_interval", proxy.HopInterval)
 		setExtra(node.Extra, "obfs", proxy.Obfs)
 		setExtra(node.Extra, "obfs_password", proxy.ObfsPassword)
+
+	case "anytls":
+		node.Type = "anytls"
+		node.Password = proxy.Password
+		applyClashCommonExtras(node, proxy)
+		setExtra(node.Extra, "idle_session_check_interval", proxy.IdleCheckInterval)
+		setExtra(node.Extra, "idle_session_timeout", proxy.IdleTimeout)
+		if proxy.MinIdleSession > 0 {
+			node.Extra["min_idle_session"] = strconv.Itoa(proxy.MinIdleSession)
+		}
+
+	case "tuic":
+		node.Type = "tuic"
+		node.Password = proxy.Password
+		node.Extra["uuid"] = proxy.UUID
+		applyClashCommonExtras(node, proxy)
+		setExtra(node.Extra, "congestion_control", util.FirstNonEmpty(proxy.CongestionControl, proxy.CongestionCtl))
+		setExtra(node.Extra, "udp_relay_mode", proxy.UDPRelayMode)
+		setExtra(node.Extra, "heartbeat", util.FirstNonEmpty(proxy.Heartbeat, proxy.HeartbeatInterval))
+		if proxy.UDPOverStream {
+			node.Extra["udp_over_stream"] = "true"
+		}
+		if proxy.ZeroRTTHandshake || proxy.ReduceRTT {
+			node.Extra["zero_rtt_handshake"] = "true"
+		}
 
 	case "socks5":
 		node.Type = "socks5"
@@ -395,6 +423,9 @@ func (p *SubscriptionParser) parseURIList(content string) ([]dialer.Node, error)
 		nodes = append(nodes, *node)
 	}
 
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("subscription URI list has no supported nodes")
+	}
 	return nodes, nil
 }
 
@@ -415,6 +446,12 @@ func parseURI(uri string) (*dialer.Node, error) {
 	}
 	if strings.HasPrefix(lowerURI, "hysteria2://") || strings.HasPrefix(lowerURI, "hy2://") {
 		return parseHysteria2URI(uri)
+	}
+	if strings.HasPrefix(lowerURI, "anytls://") {
+		return parseAnyTLSURI(uri)
+	}
+	if strings.HasPrefix(lowerURI, "tuic://") {
+		return parseTUICURI(uri)
 	}
 	return nil, fmt.Errorf("unsupported uri scheme: %s", uri[:min(10, len(uri))])
 }
@@ -733,8 +770,95 @@ func parseHysteria2URI(uri string) (*dialer.Node, error) {
 	}, nil
 }
 
+// parseAnyTLSURI 解析 anytls:// URI
+// 常见格式: anytls://password@server:port?security=tls&sni=example.com&fp=chrome#name
+func parseAnyTLSURI(uri string) (*dialer.Node, error) {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return nil, fmt.Errorf("parse anytls uri: %w", err)
+	}
+
+	password := ""
+	if parsed.User != nil {
+		password, _ = url.PathUnescape(parsed.User.String())
+	}
+	server := parsed.Hostname()
+	port, _ := strconv.Atoi(parsed.Port())
+
+	name, _ := url.QueryUnescape(parsed.Fragment)
+	if name == "" {
+		name = fmt.Sprintf("%s:%d", server, port)
+	}
+
+	query := parsed.Query()
+	return &dialer.Node{
+		Name:     name,
+		Type:     "anytls",
+		Server:   server,
+		Port:     port,
+		Password: util.FirstNonEmpty(password, query.Get("password")),
+		Extra: map[string]string{
+			"security":                    util.FirstNonEmpty(query.Get("security"), query.Get("tls"), "tls"),
+			"sni":                         util.FirstNonEmpty(query.Get("sni"), query.Get("servername"), query.Get("peer")),
+			"fingerprint":                 util.FirstNonEmpty(query.Get("fp"), query.Get("fingerprint"), query.Get("client-fingerprint")),
+			"alpn":                        query.Get("alpn"),
+			"insecure":                    util.FirstNonEmpty(query.Get("insecure"), query.Get("allowInsecure"), query.Get("allow_insecure")),
+			"idle_session_check_interval": query.Get("idle_session_check_interval"),
+			"idle_session_timeout":        query.Get("idle_session_timeout"),
+			"min_idle_session":            query.Get("min_idle_session"),
+		},
+	}, nil
+}
+
+// parseTUICURI 解析 tuic:// URI
+// 常见格式: tuic://uuid:password@server:port?congestion_control=bbr&sni=example.com&alpn=h3#name
+func parseTUICURI(uri string) (*dialer.Node, error) {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return nil, fmt.Errorf("parse tuic uri: %w", err)
+	}
+
+	uuid := ""
+	password := ""
+	if parsed.User != nil {
+		uuid = parsed.User.Username()
+		password, _ = parsed.User.Password()
+	}
+	server := parsed.Hostname()
+	port, _ := strconv.Atoi(parsed.Port())
+
+	name, _ := url.QueryUnescape(parsed.Fragment)
+	if name == "" {
+		name = fmt.Sprintf("%s:%d", server, port)
+	}
+
+	query := parsed.Query()
+	return &dialer.Node{
+		Name:     name,
+		Type:     "tuic",
+		Server:   server,
+		Port:     port,
+		Password: util.FirstNonEmpty(password, query.Get("password")),
+		Extra: map[string]string{
+			"uuid":               util.FirstNonEmpty(uuid, query.Get("uuid")),
+			"security":           util.FirstNonEmpty(query.Get("security"), query.Get("tls"), "tls"),
+			"sni":                util.FirstNonEmpty(query.Get("sni"), query.Get("servername"), query.Get("peer")),
+			"fingerprint":        util.FirstNonEmpty(query.Get("fp"), query.Get("fingerprint"), query.Get("client-fingerprint")),
+			"alpn":               query.Get("alpn"),
+			"insecure":           util.FirstNonEmpty(query.Get("insecure"), query.Get("allowInsecure"), query.Get("allow_insecure")),
+			"congestion_control": util.FirstNonEmpty(query.Get("congestion_control"), query.Get("congestion-control"), query.Get("congestion")),
+			"udp_relay_mode":     util.FirstNonEmpty(query.Get("udp_relay_mode"), query.Get("udp-relay-mode")),
+			"udp_over_stream":    util.FirstNonEmpty(query.Get("udp_over_stream"), query.Get("udp-over-stream")),
+			"zero_rtt_handshake": util.FirstNonEmpty(query.Get("zero_rtt_handshake"), query.Get("zero-rtt-handshake"), query.Get("reduce_rtt"), query.Get("reduce-rtt")),
+			"heartbeat":          util.FirstNonEmpty(query.Get("heartbeat"), query.Get("heartbeat_interval"), query.Get("heartbeat-interval")),
+			"network":            query.Get("network"),
+		},
+	}, nil
+}
+
 // decodeBase64Flexible 灵活解码 Base64（支持标准/URL-safe/有无 padding）
 func decodeBase64Flexible(s string) (string, error) {
+	s = cleanBase64Input(s)
 	// 先尝试标准 Base64
 	if decoded, err := base64.StdEncoding.DecodeString(s); err == nil {
 		return string(decoded), nil
@@ -752,6 +876,17 @@ func decodeBase64Flexible(s string) (string, error) {
 		return string(decoded), nil
 	}
 	return "", fmt.Errorf("base64 decode failed")
+}
+
+func cleanBase64Input(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\t', '\n', '\r':
+			return -1
+		default:
+			return r
+		}
+	}, strings.TrimSpace(s))
 }
 
 func setExtra(extra map[string]string, key, value string) {
