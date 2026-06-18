@@ -12,6 +12,12 @@ admin:
   login_window: "60s"
   login_lockout: "5m"
 
+health_check:
+  interval: "30s"
+  timeout: "5s"
+  url: "https://www.google.com/generate_204"
+  max_fail: 3
+
 log:
   level: "info"
   file: ""

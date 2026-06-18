@@ -1,5 +1,5 @@
 // Subscriptions
-const { Modal, Drawer, Toggle, RegionPill, useToast } = window.UI;
+const { Modal, Drawer, Toggle, Seg, RegionPill, useToast } = window.UI;
 
 function PageSubscriptions({ state, dispatch }) {
   const { pools } = state;
@@ -31,9 +31,10 @@ function PageSubscriptions({ state, dispatch }) {
                 <div className="row gap-12 subscription-title">
                   <h3 className="mono">{s.name}</h3>
                   {s.residential && <span className="pill res">residential</span>}
+                  {s.try_offline && <span className="pill mono">try offline</span>}
                 </div>
                 <div className="right subscription-actions">
-                  <span className="muted-2 mono subscription-runtime">refresh {s.update_interval} · last {s.last_updated}</span>
+                  <span className="muted-2 mono subscription-runtime">refresh {s.update_interval || "manual"} · last {s.last_updated}</span>
                   <button className="btn sm ghost" onClick={() => dispatch({type:"refreshSub", name: s.name})}><Ic.refresh/> Refresh</button>
                   <button className="btn sm ghost" onClick={() => setOpenSub(s)}><Ic.edit/> Edit</button>
                   <Toggle on={s.enabled} onChange={() => dispatch({type:"togglePool", name:s.name})}/>
@@ -92,12 +93,56 @@ function PageSubscriptions({ state, dispatch }) {
   );
 }
 
+function parseSubscriptionInterval(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return { mode: "manual", amount: 1 };
+  const match = raw.match(/^([\d.]+)\s*(m|h|d)$/);
+  if (!match) return { mode: "hours", amount: 1 };
+  const amount = Math.max(1, Number(match[1]) || 1);
+  if (match[2] === "d") return { mode: "days", amount };
+  if (match[2] === "h") return { mode: "hours", amount };
+  return { mode: "minutes", amount };
+}
+
+function formatSubscriptionInterval(mode, amount) {
+  if (mode === "manual") return "";
+  const n = Math.max(1, Number(amount) || 1);
+  if (mode === "days") return `${n}d`;
+  if (mode === "hours") return `${n}h`;
+  return `${n}m`;
+}
+
+function SubscriptionIntervalControl({ value, onChange }) {
+  const parsed = parseSubscriptionInterval(value);
+  const setMode = (mode) => onChange(formatSubscriptionInterval(mode, parsed.amount));
+  const setAmount = (amount) => onChange(formatSubscriptionInterval(parsed.mode, amount));
+  return (
+    <div className="field">
+      <label className="field-label">Refresh interval</label>
+      <div className="col gap-12">
+        <Seg value={parsed.mode} onChange={setMode}
+          options={[
+            {value:"manual", label:"Manual"},
+            {value:"minutes", label:"Minutes"},
+            {value:"hours", label:"Hours"},
+            {value:"days", label:"Days"},
+          ]}/>
+        {parsed.mode !== "manual" && (
+          <input className="input mono" type="number" min="1" step="1"
+            value={parsed.amount} onChange={e => setAmount(e.target.value)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SubEditor({ sub, dispatch, onClose, toast }) {
   const sourceForm = (pool) => ({
     name: pool.name || "",
     url: pool.url || "",
-    update_interval: pool.update_interval || "1h",
+    update_interval: pool.update_interval == null ? "1h" : pool.update_interval,
     residential: !!pool.residential,
+    try_offline: !!pool.try_offline,
   });
   const regionsFromNodes = (nodes) => Object.fromEntries((nodes || []).map(n => [n.name, n.region || ""]));
   const tagsFromNodes = (nodes) => Object.fromEntries((nodes || []).map(n => [n.name, (n.tags || []).join(", ")]));
@@ -148,11 +193,12 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
             <textarea className="input mono" value={source.url} onChange={e => setSourceField("url", e.target.value)} style={{minHeight:120}} spellCheck="false"></textarea>
             <div className="field-hint">Multiple URLs separated by newline, comma or |.</div></div>
           <div className="field-row">
-            <div className="field"><label className="field-label">Refresh interval</label>
-              <input className="input mono" value={source.update_interval} onChange={e => setSourceField("update_interval", e.target.value)} placeholder="1h"/></div>
+            <SubscriptionIntervalControl value={source.update_interval} onChange={v => setSourceField("update_interval", v)}/>
             <div className="field"><label className="field-label">Class</label>
               <Toggle on={source.residential} onChange={v => setSourceField("residential", v)} label="Residential pool"/></div>
           </div>
+          <div className="field"><label className="field-label">Fallback</label>
+            <Toggle on={source.try_offline} onChange={v => setSourceField("try_offline", v)} label="Try offline singleton"/></div>
           <div className="row gap-12" style={{marginTop:4, flexWrap:"wrap"}}>
             <button className="btn primary" onClick={async () => {
               const nextName = source.name.trim();
@@ -162,6 +208,7 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
                 url: source.url.trim(),
                 update_interval: source.update_interval.trim(),
                 residential: source.residential,
+                try_offline: source.try_offline,
               }, newName: nextName});
               if (ok) onClose();
             }}><Ic.check/> Save & fetch</button>
@@ -256,6 +303,7 @@ function AddSubscriptionModal({ open, onClose, dispatch, toast }) {
     url: "",
     update_interval: "1h",
     residential: false,
+    try_offline: false,
     reject_regex: "",
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -267,6 +315,7 @@ function AddSubscriptionModal({ open, onClose, dispatch, toast }) {
       url: form.url.trim(),
       update_interval: form.update_interval,
       residential: form.residential,
+      try_offline: form.try_offline,
       reject_regex: form.reject_regex.split("\n").map(s => s.trim()).filter(Boolean),
     }});
     if (ok) onClose();
@@ -284,13 +333,12 @@ function AddSubscriptionModal({ open, onClose, dispatch, toast }) {
           <textarea className="input mono" value={form.url} onChange={e => set("url", e.target.value)} placeholder="https://provider/sub?token=..."></textarea>
           <div className="field-hint">Multiple URLs separated by newline, comma or |. Failures don't block working sources.</div></div>
         <div className="field-row">
-          <div className="field"><label className="field-label">Refresh interval</label>
-            <select className="select" value={form.update_interval} onChange={e => set("update_interval", e.target.value)}>
-              <option>15m</option><option>30m</option><option>1h</option><option>6h</option><option>24h</option>
-            </select></div>
+          <SubscriptionIntervalControl value={form.update_interval} onChange={v => set("update_interval", v)}/>
           <div className="field"><label className="field-label">Class</label>
             <Toggle on={form.residential} onChange={v => set("residential", v)} label="Residential pool"/></div>
         </div>
+        <div className="field"><label className="field-label">Fallback</label>
+          <Toggle on={form.try_offline} onChange={v => set("try_offline", v)} label="Try offline singleton"/></div>
         <div className="field"><label className="field-label">Reject regex (one per line)</label>
           <textarea className="input mono" value={form.reject_regex} onChange={e => set("reject_regex", e.target.value)} placeholder={"流量|套餐|官网\n到期|剩余"}></textarea></div>
       </div>

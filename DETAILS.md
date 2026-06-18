@@ -23,7 +23,7 @@ chijie/
 │   │   ├── strings.go           # 跨模块共享的字符串工具：FirstNonEmpty / ContainsString / RemoveString / ParseInt / SplitList
 │   │   └── logger.go            # 日志分级：Debugf / Infof / Warnf / Errorf，受 log.level 控制
 │   ├── pool/
-│   │   ├── manager.go           # 节点池：静态/模板/订阅/直连池管理、地区组、家宽组、出口选择、模板优先级和家宽降级
+│   │   ├── manager.go           # 节点池：静态/模板/订阅/直连池管理、地区组、家宽组、出口选择、模板优先级、家宽降级和离线单节点尝试
 │   │   ├── subscription.go      # 订阅解析：Base64 URI 列表、Clash YAML、纯 URI 列表、Shadowsocks SIP002、多订阅地址、URL 与响应大小限制
 │   │   └── health.go            # 健康检查：按池配置后台探测节点连通性、延迟和模板即时测试
 │   ├── dialer/
@@ -144,9 +144,11 @@ WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读�
 - 多订阅地址，使用换行、英文逗号或 `|` 分隔。
 - 自动地区识别，也支持 `node_regions` 手动修正。
 - 支持 `node_aliases`、`node_tags`、`node_server_aliases`、`node_server_tags`、`node_server_regions`、`region_group_names` 和 `reject_regex`。
-- 拉取失败记录为池级错误，不阻断其他节点池加载。
+- 拉取失败记录为池级错误，不阻断其他节点池加载；运行时已有旧节点时继续保留上一次成功节点。
 - 订阅拉取只允许 `http` / `https` 公网目标，单次响应 body 上限 4 MB。
-- 后台健康检查记录 `Alive`、`Latency` 和连续失败次数，并读取每个池的 `health_check.interval`、`timeout`、`url`、`max_fail`。
+- `update_interval` 支持分钟、小时、天；留空表示只手动刷新。
+- `try_offline` 允许某地区只有一个离线订阅节点时继续尝试该节点。
+- 后台健康检查记录 `Alive`、`Latency` 和连续失败次数，默认参数来自 `gateway.yaml` 的 `health_check`，每个池仍可用 `health_check.interval`、`timeout`、`url`、`max_fail` 覆盖。
 
 ### dialer（出口拨号）
 
@@ -212,6 +214,7 @@ JA3/JA4/Akamai 都按 raw 输入保存，测试结果只展示远端返回的真
 - `GET /api/stats`：返回运行时长、节点池数量、指纹数量和流量指标。
 - `GET /api/traffic`：返回请求记录、时间序列和聚合指标。
 - `PUT /api/system/logging`：修改运行时日志级别，并写回 `gateway.yaml`。
+- `GET /api/system/health-check` / `PUT /api/system/health-check`：读取或保存全局健康检查默认参数，并写回 `gateway.yaml`。
 - `GET /api/config/export`：导出当前配置目录下的 YAML 配置快照。
 
 规则管理 API 已从后端移除。当前 `web/` 静态原型已接入 Admin API，构建产物复制到 `internal/admin/dist/` 后会随 Go 二进制嵌入。

@@ -23,8 +23,11 @@ type HealthChecker struct {
 	interval time.Duration
 	timeout  time.Duration
 	testURL  string
+	maxFail  int
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
+	configMu sync.RWMutex
+	wake     chan struct{}
 	mu       sync.Mutex
 	lastRun  map[string]time.Time
 }
@@ -78,9 +81,84 @@ type TemplateTestResult struct {
 }
 
 const (
-	defaultTemplateTestURL = "https://api.ipify.org?format=json"
-	chijieErrorHeader      = "X-Chijie-Error"
+	defaultTemplateTestURL     = "https://api.ipify.org?format=json"
+	defaultHealthCheckInterval = 30 * time.Second
+	defaultHealthCheckTimeout  = 5 * time.Second
+	defaultHealthCheckURL      = "https://www.google.com/generate_204"
+	defaultHealthCheckMaxFail  = 3
+	chijieErrorHeader          = "X-Chijie-Error"
 )
+
+type HealthCheckDefaults struct {
+	Interval time.Duration
+	Timeout  time.Duration
+	TestURL  string
+	MaxFail  int
+}
+
+func DefaultHealthCheckDefaults() HealthCheckDefaults {
+	return HealthCheckDefaults{
+		Interval: defaultHealthCheckInterval,
+		Timeout:  defaultHealthCheckTimeout,
+		TestURL:  defaultHealthCheckURL,
+		MaxFail:  defaultHealthCheckMaxFail,
+	}
+}
+
+func ParseHealthCheckDefaults(cfg *HealthCheckConfig) (HealthCheckDefaults, error) {
+	defaults := DefaultHealthCheckDefaults()
+	if cfg == nil {
+		return defaults, nil
+	}
+	if strings.TrimSpace(cfg.Interval) != "" {
+		interval, err := ParseDurationWithDays(strings.TrimSpace(cfg.Interval))
+		if err != nil || interval <= 0 {
+			return defaults, fmt.Errorf("invalid health_check.interval")
+		}
+		defaults.Interval = interval
+	}
+	if strings.TrimSpace(cfg.Timeout) != "" {
+		timeout, err := ParseDurationWithDays(strings.TrimSpace(cfg.Timeout))
+		if err != nil || timeout <= 0 {
+			return defaults, fmt.Errorf("invalid health_check.timeout")
+		}
+		defaults.Timeout = timeout
+	}
+	if strings.TrimSpace(cfg.URL) != "" {
+		defaults.TestURL = strings.TrimSpace(cfg.URL)
+	}
+	if cfg.MaxFail > 0 {
+		defaults.MaxFail = cfg.MaxFail
+	}
+	return defaults, nil
+}
+
+func HealthCheckDefaultsConfig(defaults HealthCheckDefaults) *HealthCheckConfig {
+	defaults = normalizeHealthCheckDefaults(defaults)
+	return &HealthCheckConfig{
+		Interval: defaults.Interval.String(),
+		Timeout:  defaults.Timeout.String(),
+		URL:      defaults.TestURL,
+		MaxFail:  defaults.MaxFail,
+	}
+}
+
+func normalizeHealthCheckDefaults(defaults HealthCheckDefaults) HealthCheckDefaults {
+	base := DefaultHealthCheckDefaults()
+	if defaults.Interval <= 0 {
+		defaults.Interval = base.Interval
+	}
+	if defaults.Timeout <= 0 {
+		defaults.Timeout = base.Timeout
+	}
+	if strings.TrimSpace(defaults.TestURL) == "" {
+		defaults.TestURL = base.TestURL
+	}
+	if defaults.MaxFail <= 0 {
+		defaults.MaxFail = base.MaxFail
+	}
+	return defaults
+}
 
 var newChijieTemplateHTTPClient = func(timeout time.Duration) *http.Client {
 	return &http.Client{
@@ -94,16 +172,13 @@ var newChijieTemplateHTTPClient = func(timeout time.Duration) *http.Client {
 // NewHealthChecker 创建健康检查器
 func NewHealthChecker(manager *Manager, interval, timeout time.Duration, testURL string) *HealthChecker {
 	if testURL == "" {
-		testURL = "https://www.google.com/generate_204"
+		testURL = defaultHealthCheckURL
 	}
 	if timeout == 0 {
-		timeout = 5 * time.Second
+		timeout = defaultHealthCheckTimeout
 	}
 	if interval == 0 {
-		interval = minHealthCheckInterval(manager, 5*time.Minute)
-		if interval > 30*time.Second {
-			interval = 30 * time.Second
-		}
+		interval = defaultHealthCheckInterval
 	}
 
 	return &HealthChecker{
@@ -111,7 +186,40 @@ func NewHealthChecker(manager *Manager, interval, timeout time.Duration, testURL
 		interval: interval,
 		timeout:  timeout,
 		testURL:  testURL,
+		maxFail:  defaultHealthCheckMaxFail,
+		wake:     make(chan struct{}, 1),
 		lastRun:  make(map[string]time.Time),
+	}
+}
+
+func (hc *HealthChecker) Defaults() HealthCheckDefaults {
+	if hc == nil {
+		return DefaultHealthCheckDefaults()
+	}
+	hc.configMu.RLock()
+	defer hc.configMu.RUnlock()
+	return normalizeHealthCheckDefaults(HealthCheckDefaults{
+		Interval: hc.interval,
+		Timeout:  hc.timeout,
+		TestURL:  hc.testURL,
+		MaxFail:  hc.maxFail,
+	})
+}
+
+func (hc *HealthChecker) UpdateDefaults(defaults HealthCheckDefaults) {
+	if hc == nil {
+		return
+	}
+	defaults = normalizeHealthCheckDefaults(defaults)
+	hc.configMu.Lock()
+	hc.interval = defaults.Interval
+	hc.timeout = defaults.Timeout
+	hc.testURL = defaults.TestURL
+	hc.maxFail = defaults.MaxFail
+	hc.configMu.Unlock()
+	select {
+	case hc.wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -127,14 +235,17 @@ func (hc *HealthChecker) Start() {
 		// 启动后立即检查一次
 		hc.checkAll(true)
 
-		ticker := time.NewTicker(hc.interval)
-		defer ticker.Stop()
-
 		for {
+			interval := hc.checkLoopInterval()
+			timer := time.NewTimer(interval)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
-			case <-ticker.C:
+			case <-hc.wake:
+				timer.Stop()
+				continue
+			case <-timer.C:
 				hc.checkAll(false)
 			}
 		}
@@ -208,12 +319,13 @@ func (hc *HealthChecker) listHealthTargets() []healthCheckTarget {
 	hc.manager.mu.RLock()
 	defer hc.manager.mu.RUnlock()
 
+	defaults := hc.Defaults()
 	targets := make([]healthCheckTarget, 0, len(hc.manager.pools))
 	for name, nodePool := range hc.manager.pools {
 		if nodePool == nil || nodePool.Config == nil || !poolEnabled(nodePool.Config) {
 			continue
 		}
-		options := healthCheckOptionsForPool(nodePool, hc.interval, hc.timeout, hc.testURL)
+		options := healthCheckOptionsForPool(nodePool, defaults)
 		target := healthCheckTarget{
 			PoolName: name,
 			Pool:     nodePool,
@@ -234,6 +346,11 @@ func (hc *HealthChecker) listHealthTargets() []healthCheckTarget {
 		}
 	}
 	return targets
+}
+
+func (hc *HealthChecker) checkLoopInterval() time.Duration {
+	defaults := hc.Defaults()
+	return minHealthCheckInterval(hc.manager, defaults.Interval)
 }
 
 func (hc *HealthChecker) shouldRunPool(poolName string, interval time.Duration, now time.Time) bool {
@@ -267,37 +384,29 @@ func minHealthCheckInterval(manager *Manager, fallback time.Duration) time.Durat
 		if nodePool == nil || nodePool.Config == nil || nodePool.Config.HealthCheck == nil {
 			continue
 		}
-		if interval, err := time.ParseDuration(strings.TrimSpace(nodePool.Config.HealthCheck.Interval)); err == nil && interval > 0 && interval < minInterval {
+		if interval, err := ParseDurationWithDays(strings.TrimSpace(nodePool.Config.HealthCheck.Interval)); err == nil && interval > 0 && interval < minInterval {
 			minInterval = interval
 		}
 	}
 	return minInterval
 }
 
-func healthCheckOptionsForPool(nodePool *Pool, defaultInterval, defaultTimeout time.Duration, defaultURL string) healthCheckOptions {
+func healthCheckOptionsForPool(nodePool *Pool, defaults HealthCheckDefaults) healthCheckOptions {
+	defaults = normalizeHealthCheckDefaults(defaults)
 	options := healthCheckOptions{
-		Interval: defaultInterval,
-		Timeout:  defaultTimeout,
-		TestURL:  defaultURL,
-		MaxFail:  3,
-	}
-	if options.Interval <= 0 {
-		options.Interval = 5 * time.Minute
-	}
-	if options.Timeout <= 0 {
-		options.Timeout = 5 * time.Second
-	}
-	if options.TestURL == "" {
-		options.TestURL = "https://www.google.com/generate_204"
+		Interval: defaults.Interval,
+		Timeout:  defaults.Timeout,
+		TestURL:  defaults.TestURL,
+		MaxFail:  defaults.MaxFail,
 	}
 	if nodePool == nil || nodePool.Config == nil || nodePool.Config.HealthCheck == nil {
 		return options
 	}
 	cfg := nodePool.Config.HealthCheck
-	if interval, err := time.ParseDuration(strings.TrimSpace(cfg.Interval)); err == nil && interval > 0 {
+	if interval, err := ParseDurationWithDays(strings.TrimSpace(cfg.Interval)); err == nil && interval > 0 {
 		options.Interval = interval
 	}
-	if timeout, err := time.ParseDuration(strings.TrimSpace(cfg.Timeout)); err == nil && timeout > 0 {
+	if timeout, err := ParseDurationWithDays(strings.TrimSpace(cfg.Timeout)); err == nil && timeout > 0 {
 		options.Timeout = timeout
 	}
 	if strings.TrimSpace(cfg.URL) != "" {
@@ -327,10 +436,10 @@ func probeNodeConnectivity(entry *NodeEntry, testURL string, timeout time.Durati
 		return result
 	}
 	if testURL == "" {
-		testURL = "https://www.google.com/generate_204"
+		testURL = defaultHealthCheckURL
 	}
 	if timeout == 0 {
-		timeout = 5 * time.Second
+		timeout = defaultHealthCheckTimeout
 	}
 	result.TestURL = testURL
 
@@ -593,7 +702,7 @@ func (m *Manager) TestNodeConnectivity(poolName, nodeName, testURL string, timeo
 	probe := probeNodeConnectivity(entry, testURL, timeout)
 
 	nodePool.mu.Lock()
-	options := healthCheckOptionsForPool(nodePool, 5*time.Minute, 5*time.Second, "https://www.google.com/generate_204")
+	options := healthCheckOptionsForPool(nodePool, DefaultHealthCheckDefaults())
 	alive, failCount, _ := updateNodeHealth(entry, probe.Latency, probe.Error, options.MaxFail)
 	result := &NodeTestResult{
 		connectivityCommon: connectivityCommon{

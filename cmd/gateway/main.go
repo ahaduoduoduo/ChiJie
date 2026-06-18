@@ -43,7 +43,8 @@ type GatewayConfig struct {
 		LoginWindow      string `yaml:"login_window"`
 		LoginLockout     string `yaml:"login_lockout"`
 	} `yaml:"admin"`
-	Log struct {
+	HealthCheck pool.HealthCheckConfig `yaml:"health_check"`
+	Log         struct {
 		Level string `yaml:"level"`
 		File  string `yaml:"file"`
 	} `yaml:"log"`
@@ -98,6 +99,11 @@ func main() {
 
 	// 启动健康检查
 	healthChecker := pool.NewHealthChecker(poolMgr, 0, 0, "")
+	if defaults, err := pool.ParseHealthCheckDefaults(&gatewayConfig.HealthCheck); err == nil {
+		healthChecker.UpdateDefaults(defaults)
+	} else {
+		log.Printf("invalid health_check config, using defaults: %v", err)
+	}
 	healthChecker.Start()
 
 	// 加载指纹库
@@ -129,6 +135,7 @@ func main() {
 			loginLimit,
 			trafficStore,
 		)
+		adminSrv.SetHealthChecker(healthChecker)
 		adminSrv.SetRuntimeInfo(admin.RuntimeInfo{
 			ProxyListen: gatewayConfig.Server.Listen,
 			ProxyTLS:    gatewayConfig.Server.TLS.Cert != "" && gatewayConfig.Server.TLS.Key != "",

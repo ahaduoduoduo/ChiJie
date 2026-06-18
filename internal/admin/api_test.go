@@ -1,11 +1,16 @@
 package admin
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"chijie/internal/fingerprint"
 	"chijie/internal/pool"
 )
 
@@ -83,5 +88,79 @@ func TestValidatePoolConfigRejectsHTTPChijieTemplate(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected http chijie template to be rejected")
+	}
+}
+
+func TestValidatePoolConfigAcceptsManualAndDailySubscriptionRefresh(t *testing.T) {
+	for _, interval := range []string{"", "3d"} {
+		err := validatePoolConfig(&pool.PoolConfig{
+			Source:         "subscription",
+			URL:            "https://example.com/sub",
+			UpdateInterval: interval,
+		})
+		if err != nil {
+			t.Fatalf("validate subscription interval %q: %v", interval, err)
+		}
+	}
+}
+
+func TestHealthCheckSettingsPersistsAndUpdatesChecker(t *testing.T) {
+	dir := t.TempDir()
+	gatewayPath := filepath.Join(dir, "gateway.yaml")
+	if err := os.WriteFile(gatewayPath, []byte(`
+server:
+  listen: ":8080"
+admin:
+  jwt_secret: "1234567890123456"
+log:
+  level: "info"
+  file: ""
+`), 0600); err != nil {
+		t.Fatalf("write gateway config: %v", err)
+	}
+
+	manager := pool.NewManager()
+	checker := pool.NewHealthChecker(manager, 0, 0, "")
+	server := NewServer("127.0.0.1:0", manager, fingerprint.NewManager(), dir, "", "1234567890123456", "24h", nil)
+	server.SetHealthChecker(checker)
+
+	reqBody := []byte(`{"interval":"2m","timeout":"9s","url":"https://example.com/health","max_fail":7}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/system/health-check", bytes.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT health-check status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	defaults := checker.Defaults()
+	if defaults.Interval != 2*time.Minute || defaults.Timeout != 9*time.Second || defaults.MaxFail != 7 {
+		t.Fatalf("checker defaults not updated: %#v", defaults)
+	}
+	if defaults.TestURL != "https://example.com/health" {
+		t.Fatalf("checker test url = %q", defaults.TestURL)
+	}
+
+	var stored struct {
+		HealthCheck pool.HealthCheckConfig `yaml:"health_check"`
+	}
+	if err := loadYAML(gatewayPath, &stored); err != nil {
+		t.Fatalf("load persisted gateway config: %v", err)
+	}
+	if stored.HealthCheck.Interval != "2m0s" || stored.HealthCheck.Timeout != "9s" || stored.HealthCheck.URL != "https://example.com/health" || stored.HealthCheck.MaxFail != 7 {
+		t.Fatalf("unexpected persisted health_check: %#v", stored.HealthCheck)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/system/health-check", nil)
+	getRec := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET health-check status = %d, body: %s", getRec.Code, getRec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode health-check response: %v", err)
+	}
+	if got["interval"] != "2m0s" || got["timeout"] != "9s" || got["url"] != "https://example.com/health" || got["max_fail"] != float64(7) {
+		t.Fatalf("unexpected health-check response: %#v", got)
 	}
 }

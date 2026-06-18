@@ -5,15 +5,39 @@ function PageSystem({ state, dispatch }) {
   const [logLevel, setLogLevel] = React.useState("info");
   const [tokenOpen, setTokenOpen] = React.useState(false);
   const [savingLog, setSavingLog] = React.useState(false);
+  const [savingHealth, setSavingHealth] = React.useState(false);
+  const [healthDirty, setHealthDirty] = React.useState(false);
+  const [healthForm, setHealthForm] = React.useState({
+    interval: "30s",
+    timeout: "5s",
+    url: "https://www.google.com/generate_204",
+    max_fail: 3,
+  });
   const stats = state.stats || {};
   const traffic = stats.traffic || {};
   const runtime = stats.runtime || {};
+  const health = stats.health_check || {};
   const tokenHours = state.auth?.seconds ? Math.max(1, Math.round(state.auth.seconds / 3600)) : 0;
   const toast = useToast();
 
   React.useEffect(() => {
     if (runtime.log_level) setLogLevel(runtime.log_level);
   }, [runtime.log_level]);
+
+  React.useEffect(() => {
+    if (healthDirty) return;
+    setHealthForm({
+      interval: health.interval || "30s",
+      timeout: health.timeout || "5s",
+      url: health.url || "https://www.google.com/generate_204",
+      max_fail: health.max_fail || 3,
+    });
+  }, [health.interval, health.timeout, health.url, health.max_fail, healthDirty]);
+
+  const setHealthField = (key, value) => {
+    setHealthDirty(true);
+    setHealthForm(v => ({ ...v, [key]: value }));
+  };
 
   const saveLogLevel = async (level) => {
     setLogLevel(level);
@@ -44,6 +68,21 @@ function PageSystem({ state, dispatch }) {
       toast("Config exported");
     } catch (err) {
       toast(err.message);
+    }
+  };
+
+  const saveHealthCheck = async () => {
+    setSavingHealth(true);
+    try {
+      const result = await dispatch({ type: "updateHealthCheck", config: {
+        interval: healthForm.interval.trim(),
+        timeout: healthForm.timeout.trim(),
+        url: healthForm.url.trim(),
+        max_fail: Number(healthForm.max_fail || 0),
+      }});
+      if (result) setHealthDirty(false);
+    } finally {
+      setSavingHealth(false);
     }
   };
 
@@ -81,6 +120,26 @@ function PageSystem({ state, dispatch }) {
 	              <div className="k">JWT</div><div className="v mono">{tokenHours ? `${tokenHours}h remaining` : "active"}</div>
 	              <div className="k">Pools</div><div className="v mono">{stats.pools_count ?? state.pools.length}</div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{marginBottom:24}}>
+        <div className="card-h bordered"><h3>Health check</h3><span className="sub">runtime defaults</span></div>
+        <div className="card-body">
+          <div className="field-row">
+            <div className="field"><label className="field-label">Check interval</label>
+              <input className="input mono" value={healthForm.interval} onChange={e => setHealthField("interval", e.target.value)} placeholder="30s"/></div>
+            <div className="field"><label className="field-label">Timeout</label>
+              <input className="input mono" value={healthForm.timeout} onChange={e => setHealthField("timeout", e.target.value)} placeholder="5s"/></div>
+            <div className="field"><label className="field-label">Max failures</label>
+              <input className="input mono" type="number" min="1" value={healthForm.max_fail} onChange={e => setHealthField("max_fail", e.target.value)} placeholder="3"/></div>
+          </div>
+          <div className="field" style={{marginTop:16}}><label className="field-label">Test URL</label>
+            <input className="input mono" value={healthForm.url} onChange={e => setHealthField("url", e.target.value)} placeholder="https://www.google.com/generate_204"/></div>
+          <div className="row gap-12" style={{marginTop:16}}>
+            <button className="btn primary" disabled={savingHealth} onClick={saveHealthCheck}><Ic.check/> Save health check</button>
+            {savingHealth && <span className="field-hint">Saving…</span>}
           </div>
         </div>
       </div>

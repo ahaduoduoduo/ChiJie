@@ -83,6 +83,12 @@ admin:
   login_max_failures: 5
   login_window: "60s"
   login_lockout: "5m"
+
+health_check:
+  interval: "30s"
+  timeout: "5s"
+  url: "https://www.google.com/generate_204"
+  max_fail: 3
 ```
 
 `/proxy` 单次请求 body 上限 10 MB，上游响应 body 上限 32 MB；Admin API JSON body 上限 1 MB。
@@ -121,6 +127,8 @@ Docker Hub 自动发布详见 [docs/dockerhub-release.md](docs/dockerhub-release
 `vmess` / `vless` / `trojan` 支持常见 V2Ray 传输参数：TCP、WebSocket、gRPC、HTTP/H2、HTTPUpgrade、QUIC。`vless` 支持 TLS 和 Reality；`anytls` / `tuic` 使用 sing-box outbound 并默认启用 TLS。Reality 和订阅中的 `fp/client-fingerprint` 需要使用 `-tags with_utls` 构建，`./build.sh` 已默认启用。
 
 订阅导入支持 Clash YAML、Base64 URI 列表、未 Base64 包装的纯 URI 列表。URI 列表支持 `ss`、`vmess`、`vless`、`trojan`、`hysteria2` / `hy2`、`anytls` 和 `tuic`。Shadowsocks URI 支持 `ss://userinfo@host:port?plugin=...` 和 SIP002 常见的 `ss://userinfo@host:port/?plugin=...` 写法；`simple-obfs` 插件名会规范化为 sing-box 可识别的 `obfs-local`。单个订阅池可填写多个订阅地址，使用换行、英文逗号或 `|` 分隔；部分订阅地址失败时，已成功解析的节点仍会进入该池。订阅地址必须是 `http` / `https` 公网目标，响应体超过 4 MB 时会拒绝解析。
+
+订阅池的 `update_interval` 支持 `30m`、`12h`、`3d`，留空表示只手动刷新。自动刷新或配置重载时，如果最近一次拉取失败，运行时保留上一次成功拉取的节点并记录池级错误。
 
 ## 请求协议
 
@@ -172,9 +180,10 @@ Content-Type: application/json
 4. `residential=false` 查找普通地区组，例如 `US`。
 5. `residential=true` 查找家宽地区组，例如 `US-RES`。
 6. 地区组内存在可用静态节点或订阅节点时，按 `strategy` 选择节点。
-7. 地区组内没有可用节点时，使用同类型模板节点生成出口；模板按 `priority` 从高到低尝试。
-8. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板。
-9. 没有可用节点也没有可用模板时返回错误。
+7. 订阅池开启 `try_offline` 且某地区只有一个离线订阅节点时，在模板 fallback 前允许该节点再尝试一次。
+8. 地区组内没有可用节点时，使用同类型模板节点生成出口；模板按 `priority` 从高到低尝试。
+9. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板。
+10. 没有可用节点也没有可用模板时返回错误。
 
 任意地区出口不会使用 `direct`、`type: direct` 静态节点或模板节点，因为模板节点需要明确地区码来生成代理账号。
 
@@ -276,6 +285,7 @@ Proxy API 调用 token 由后台生成，使用同一个 `jwt_secret` 签名，�
 | POST | /api/reload | 热重载节点池和 TLS 指纹配置 |
 | GET | /api/stats | 基础统计、节点池数量、指纹数量和流量指标 |
 | PUT | /api/system/logging | 修改当前日志级别并写入 `gateway.yaml` |
+| GET / PUT | /api/system/health-check | 查看或修改全局健康检查默认参数，并写入 `gateway.yaml` |
 | GET | /api/config/export | 导出当前 YAML 配置快照 |
 
 ## 开发计划

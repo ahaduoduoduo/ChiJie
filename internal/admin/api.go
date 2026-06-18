@@ -46,19 +46,20 @@ var webFS embed.FS
 
 // Server Admin API 服务器
 type Server struct {
-	poolManager  *pool.Manager
-	fpManager    *fingerprint.Manager
-	traffic      *traffic.Store
-	configDir    string
-	startTime    time.Time
-	httpServer   *http.Server
-	fileMu       sync.Mutex    // 保护配置文件写入
-	password     string        // 管理员密码
-	jwtSecret    string        // JWT 签名密钥
-	jwtExpire    time.Duration // JWT 过期时间
-	loginLimiter *loginLimiter // 登录速率限制
-	runtimeMu    sync.RWMutex
-	runtimeInfo  RuntimeInfo
+	poolManager   *pool.Manager
+	healthChecker *pool.HealthChecker
+	fpManager     *fingerprint.Manager
+	traffic       *traffic.Store
+	configDir     string
+	startTime     time.Time
+	httpServer    *http.Server
+	fileMu        sync.Mutex    // 保护配置文件写入
+	password      string        // 管理员密码
+	jwtSecret     string        // JWT 签名密钥
+	jwtExpire     time.Duration // JWT 过期时间
+	loginLimiter  *loginLimiter // 登录速率限制
+	runtimeMu     sync.RWMutex
+	runtimeInfo   RuntimeInfo
 }
 
 // RuntimeInfo 是 Admin System 页面展示的运行时配置摘要。
@@ -152,6 +153,7 @@ func NewServer(listen string, poolManager *pool.Manager, fpManager *fingerprint.
 	mux.HandleFunc("/api/stats", s.authMiddleware(s.handleStats))
 	mux.HandleFunc("/api/traffic", s.authMiddleware(s.handleTraffic))
 	mux.HandleFunc("/api/system/logging", s.authMiddleware(s.handleLogging))
+	mux.HandleFunc("/api/system/health-check", s.authMiddleware(s.handleHealthCheckSettings))
 	mux.HandleFunc("/api/config/export", s.authMiddleware(s.handleConfigExport))
 
 	// 前端静态文件（SPA fallback）
@@ -211,6 +213,10 @@ func (s *Server) SetRuntimeInfo(info RuntimeInfo) {
 	}
 	info.AuthEnabled = s.password != ""
 	s.runtimeInfo = info
+}
+
+func (s *Server) SetHealthChecker(checker *pool.HealthChecker) {
+	s.healthChecker = checker
 }
 
 func (s *Server) runtimeSnapshot() RuntimeInfo {
@@ -906,6 +912,14 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 			s.poolManager.StartSubscriptionUpdater()
 		}
 	}
+	if s.healthChecker != nil {
+		defaults, err := s.loadHealthCheckSettings()
+		if err != nil {
+			errors = append(errors, "health_check: "+err.Error())
+		} else {
+			s.healthChecker.UpdateDefaults(defaults)
+		}
+	}
 
 	if len(errors) > 0 {
 		log.Printf("admin: reload partial failure: %v", errors)
@@ -938,6 +952,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		"fingerprints": len(s.fpManager.List()),
 		"traffic":      s.traffic.Metrics(),
 		"runtime":      s.runtimeSnapshot(),
+		"health_check": s.healthCheckSettingsSnapshot(),
 	})
 }
 
@@ -993,6 +1008,81 @@ func (s *Server) persistLogLevel(level string) error {
 	s.runtimeInfo = info
 	s.runtimeMu.Unlock()
 	return nil
+}
+
+func (s *Server) handleHealthCheckSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		writeJSON(w, http.StatusOK, s.healthCheckSettingsSnapshot())
+	case "PUT":
+		var req pool.HealthCheckConfig
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request body"})
+			return
+		}
+		defaults, err := pool.ParseHealthCheckDefaults(&req)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		cfg := pool.HealthCheckDefaultsConfig(defaults)
+		if err := s.persistHealthCheckSettings(cfg); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		if s.healthChecker != nil {
+			s.healthChecker.UpdateDefaults(defaults)
+		}
+		writeJSON(w, http.StatusOK, s.healthCheckSettingsSnapshot())
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) healthCheckSettingsSnapshot() map[string]any {
+	defaults := pool.DefaultHealthCheckDefaults()
+	if s.healthChecker != nil {
+		defaults = s.healthChecker.Defaults()
+	}
+	cfg := pool.HealthCheckDefaultsConfig(defaults)
+	return map[string]any{
+		"interval": cfg.Interval,
+		"timeout":  cfg.Timeout,
+		"url":      cfg.URL,
+		"max_fail": cfg.MaxFail,
+	}
+}
+
+func (s *Server) persistHealthCheckSettings(healthCfg *pool.HealthCheckConfig) error {
+	s.fileMu.Lock()
+	defer s.fileMu.Unlock()
+
+	path := filepath.Join(s.configDir, "gateway.yaml")
+	var cfg map[string]any
+	if err := loadYAML(path, &cfg); err != nil {
+		return err
+	}
+	cfg["health_check"] = map[string]any{
+		"interval": healthCfg.Interval,
+		"timeout":  healthCfg.Timeout,
+		"url":      healthCfg.URL,
+		"max_fail": healthCfg.MaxFail,
+	}
+	if err := atomicWriteYAML(path, cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) loadHealthCheckSettings() (pool.HealthCheckDefaults, error) {
+	path := filepath.Join(s.configDir, "gateway.yaml")
+	var cfg struct {
+		HealthCheck *pool.HealthCheckConfig `yaml:"health_check"`
+	}
+	if err := loadYAML(path, &cfg); err != nil {
+		return pool.DefaultHealthCheckDefaults(), err
+	}
+	return pool.ParseHealthCheckDefaults(cfg.HealthCheck)
 }
 
 func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {
@@ -1238,8 +1328,9 @@ func validatePoolConfig(config *pool.PoolConfig) error {
 		if strings.TrimSpace(config.URL) == "" {
 			return fmt.Errorf("subscription url is required")
 		}
+		config.UpdateInterval = strings.TrimSpace(config.UpdateInterval)
 		if config.UpdateInterval != "" {
-			if _, err := time.ParseDuration(config.UpdateInterval); err != nil {
+			if _, err := pool.ParseDurationWithDays(config.UpdateInterval); err != nil {
 				return fmt.Errorf("invalid update_interval: %w", err)
 			}
 		}

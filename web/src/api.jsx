@@ -145,6 +145,7 @@
       residential: !!cfg.residential,
       url: cfg.url || "",
       update_interval: cfg.update_interval || "",
+      try_offline: !!cfg.try_offline,
       last_updated: "runtime",
       last_error: raw.error || "",
       type: cfg.type || "",
@@ -319,15 +320,19 @@
     loadState,
     refreshNodes: () => request("/api/nodes"),
     refreshSubscription: (pool) => request(`/api/nodes/refresh?pool=${encodeURIComponent(pool)}`, { method: "POST" }),
-	    reload: () => request("/api/reload", { method: "POST" }),
-	    updateLogging: ({ level }) => request("/api/system/logging", {
-	      method: "PUT",
-	      body: { level },
-	    }),
-	    exportConfig: () => request("/api/config/export"),
-	    setNodeEnabled: ({ pool, node, enabled }) => request("/api/nodes/enabled", {
-	      method: "POST",
-	      body: { pool, node, enabled },
+    reload: () => request("/api/reload", { method: "POST" }),
+    updateLogging: ({ level }) => request("/api/system/logging", {
+      method: "PUT",
+      body: { level },
+    }),
+    updateHealthCheck: (config) => request("/api/system/health-check", {
+      method: "PUT",
+      body: config,
+    }),
+    exportConfig: () => request("/api/config/export"),
+    setNodeEnabled: ({ pool, node, enabled }) => request("/api/nodes/enabled", {
+      method: "POST",
+      body: { pool, node, enabled },
     }),
     testNode: ({ pool, node }) => request("/api/nodes/test", {
       method: "POST",

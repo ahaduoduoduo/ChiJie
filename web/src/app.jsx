@@ -407,6 +407,12 @@ function App() {
           toast("Config reloaded");
           return result;
         }
+        case "updateHealthCheck": {
+          const result = await api.updateHealthCheck(action.config);
+          await refreshData(true);
+          toast("Health check saved");
+          return result;
+        }
         default:
           return null;
       }

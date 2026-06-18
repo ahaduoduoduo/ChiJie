@@ -29,6 +29,9 @@ node_pools:
     subscription-example:
         source: subscription
         url: https://your-subscription-host/path?token=REPLACE_WITH_TOKEN
+        # 留空表示手动刷新；也支持 12h、3d 这类小时/天配置。
         update_interval: 1h
+        # 当某地区只有这个订阅池的一个离线节点时，仍允许请求再尝试一次。
+        try_offline: false
         reject_regex:
             - 剩余流量|套餐

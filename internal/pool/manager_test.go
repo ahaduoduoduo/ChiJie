@@ -100,6 +100,101 @@ node_pools:
 	}
 }
 
+func TestParseDurationWithDays(t *testing.T) {
+	got, err := ParseDurationWithDays("3d")
+	if err != nil {
+		t.Fatalf("parse days: %v", err)
+	}
+	if got != 72*time.Hour {
+		t.Fatalf("duration = %s, want 72h", got)
+	}
+}
+
+func TestLoadFromFileKeepsPreviousSubscriptionEntriesOnFetchError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nodes.yaml")
+	data := []byte(`
+node_pools:
+  sub:
+    source: subscription
+    url: http://127.0.0.1:9/sub
+`)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	manager := NewManager()
+	previous, err := manager.buildPool("sub", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "old-node", Type: "direct", Region: "US"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build previous pool: %v", err)
+	}
+	previous.Config = &PoolConfig{Source: "subscription", URL: "http://127.0.0.1:9/sub"}
+	previous.Entries[0].Alive = false
+	previous.Entries[0].FailCount = 2
+	previous.Entries[0].Latency = 123 * time.Millisecond
+	manager.pools["sub"] = previous
+
+	if err := manager.LoadFromFile(path); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	current := manager.GetPool("sub")
+	if current == nil || len(current.Entries) != 1 {
+		t.Fatalf("expected preserved entry, got %#v", current)
+	}
+	entry := current.Entries[0]
+	if entry.Node.Name != "old-node" || entry.Alive || entry.FailCount != 2 || entry.Latency != 123*time.Millisecond {
+		t.Fatalf("unexpected preserved entry: %#v", entry)
+	}
+	if current.Error == "" {
+		t.Fatalf("expected current fetch error to remain visible")
+	}
+}
+
+func TestLoadFromFileDoesNotPreserveStaticEntriesWhenPoolBecomesSubscription(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nodes.yaml")
+	data := []byte(`
+node_pools:
+  sub:
+    source: subscription
+    url: http://127.0.0.1:9/sub
+`)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	manager := NewManager()
+	previous, err := manager.buildPool("sub", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "static-node", Type: "socks5", Server: "127.0.0.1", Port: 1080, Region: "US"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build previous pool: %v", err)
+	}
+	manager.pools["sub"] = previous
+
+	if err := manager.LoadFromFile(path); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	current := manager.GetPool("sub")
+	if current == nil {
+		t.Fatalf("expected subscription pool to remain loaded")
+	}
+	if len(current.Entries) != 0 {
+		t.Fatalf("expected static entries not to be preserved, got %d", len(current.Entries))
+	}
+	if current.Error == "" {
+		t.Fatalf("expected current fetch error to remain visible")
+	}
+}
+
 func TestSubscriptionPoolLoadsWithFetchError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -119,6 +214,54 @@ func TestSubscriptionPoolLoadsWithFetchError(t *testing.T) {
 	}
 	if len(pool.Entries) != 0 {
 		t.Fatalf("expected no entries on failed subscription fetch")
+	}
+}
+
+func TestTryOfflineUsesSingleOfflineSubscriptionNode(t *testing.T) {
+	manager := NewManager()
+	nodePool, err := manager.buildPool("sub", &PoolConfig{
+		Source:     "static",
+		TryOffline: true,
+		Nodes: []dialer.Node{
+			{Name: "ng-only", Type: "socks5", Server: "127.0.0.1", Port: 1080, Region: "NG"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	nodePool.Config.Source = "subscription"
+	nodePool.Entries[0].Alive = false
+	manager.pools["sub"] = nodePool
+
+	choice, err := manager.SelectEgress("NG", "random", false)
+	if err != nil {
+		t.Fatalf("select offline singleton: %v", err)
+	}
+	if choice.NodeName != "ng-only" || choice.PoolName != "sub" {
+		t.Fatalf("unexpected offline singleton choice: %#v", choice)
+	}
+}
+
+func TestTryOfflineRequiresOnlyOneMatchingNode(t *testing.T) {
+	manager := NewManager()
+	nodePool, err := manager.buildPool("sub", &PoolConfig{
+		Source:     "static",
+		TryOffline: true,
+		Nodes: []dialer.Node{
+			{Name: "ng-a", Type: "socks5", Server: "127.0.0.1", Port: 1080, Region: "NG"},
+			{Name: "ng-b", Type: "socks5", Server: "127.0.0.1", Port: 1081, Region: "NG"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	nodePool.Config.Source = "subscription"
+	nodePool.Entries[0].Alive = false
+	nodePool.Entries[1].Alive = false
+	manager.pools["sub"] = nodePool
+
+	if _, err := manager.SelectEgress("NG", "random", false); err == nil {
+		t.Fatalf("expected multiple offline nodes to stay unavailable")
 	}
 }
 

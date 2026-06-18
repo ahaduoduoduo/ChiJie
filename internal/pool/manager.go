@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ type PoolConfig struct {
 	UpdateInterval    string              `yaml:"update_interval" json:"update_interval"`                 // 订阅更新间隔
 	Filter            *FilterConfig       `yaml:"filter" json:"filter"`                                   // 节点过滤
 	HealthCheck       *HealthCheckConfig  `yaml:"health_check" json:"health_check"`                       // 健康检查配置
+	TryOffline        bool                `yaml:"try_offline,omitempty" json:"try_offline,omitempty"`     // 唯一地区节点离线时仍尝试
 	Nodes             []dialer.Node       `yaml:"nodes" json:"nodes"`                                     // 静态节点列表
 	DisabledNodes     []string            `yaml:"disabled_nodes" json:"disabled_nodes"`                   // 禁用节点名
 	TemplateType      string              `yaml:"template_type,omitempty" json:"template_type,omitempty"` // proxy, chijie
@@ -129,6 +131,22 @@ func NewManager() *Manager {
 	}
 }
 
+// ParseDurationWithDays 兼容 Go duration，并额外支持 d 表示天。
+func ParseDurationWithDays(raw string) (time.Duration, error) {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	if value == "" {
+		return 0, fmt.Errorf("duration is empty")
+	}
+	if strings.HasSuffix(value, "d") {
+		days, err := strconv.ParseFloat(strings.TrimSuffix(value, "d"), 64)
+		if err != nil || days <= 0 {
+			return 0, fmt.Errorf("invalid duration: %s", raw)
+		}
+		return time.Duration(days * float64(24*time.Hour)), nil
+	}
+	return time.ParseDuration(value)
+}
+
 // LoadFromFile 从 YAML 文件加载节点池配置
 func (m *Manager) LoadFromFile(path string) error {
 	data, err := os.ReadFile(path)
@@ -141,11 +159,21 @@ func (m *Manager) LoadFromFile(path string) error {
 		return fmt.Errorf("parse nodes config: %w", err)
 	}
 
+	m.mu.RLock()
+	oldPools := make(map[string]*Pool, len(m.pools))
+	for name, oldPool := range m.pools {
+		oldPools[name] = oldPool
+	}
+	m.mu.RUnlock()
+
 	newPools := make(map[string]*Pool, len(config.NodePools))
 	for name, poolCfg := range config.NodePools {
 		pool, err := m.buildPool(name, poolCfg)
 		if err != nil {
 			return fmt.Errorf("build pool %s: %w", name, err)
+		}
+		if preserved := preserveSubscriptionEntriesOnError(name, poolCfg, pool, previousSubscriptionPool(name, poolCfg, oldPools)); preserved != nil {
+			pool = preserved
 		}
 		newPools[name] = pool
 	}
@@ -230,6 +258,56 @@ func (m *Manager) buildPool(name string, cfg *PoolConfig) (*Pool, error) {
 	return pool, nil
 }
 
+func previousSubscriptionPool(name string, cfg *PoolConfig, oldPools map[string]*Pool) *Pool {
+	if cfg == nil || cfg.Source != "subscription" {
+		return nil
+	}
+	if previous := oldPools[name]; previous != nil && previous.Config != nil && previous.Config.Source == "subscription" {
+		return previous
+	}
+	for _, previous := range oldPools {
+		if previous == nil || previous.Config == nil || previous.Config.Source != "subscription" {
+			continue
+		}
+		if strings.TrimSpace(previous.Config.URL) == strings.TrimSpace(cfg.URL) {
+			return previous
+		}
+	}
+	return nil
+}
+
+func preserveSubscriptionEntriesOnError(name string, cfg *PoolConfig, current *Pool, previous *Pool) *Pool {
+	if cfg == nil || cfg.Source != "subscription" || current == nil || current.Error == "" || previous == nil {
+		return nil
+	}
+	previous.mu.RLock()
+	defer previous.mu.RUnlock()
+	if len(previous.Entries) == 0 {
+		return nil
+	}
+	entries := make([]*NodeEntry, 0, len(previous.Entries))
+	for _, entry := range previous.Entries {
+		if entry == nil || entry.Node == nil {
+			continue
+		}
+		next := newNodeEntry(entry.Node, entry.Dialer, cfg)
+		next.Alive = entry.Alive
+		next.Latency = entry.Latency
+		next.FailCount = entry.FailCount
+		entries = append(entries, next)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	log.Printf("pool %s: keeping %d previous subscription nodes after refresh error: %s", name, len(entries), current.Error)
+	return &Pool{
+		Name:    name,
+		Config:  cfg,
+		Entries: entries,
+		Error:   current.Error,
+	}
+}
+
 // SelectEgress 按地区、策略和家宽要求选择出口。普通节点优先，模板节点作为兜底。
 func (m *Manager) SelectEgress(region string, strategy string, residential bool) (*EgressChoice, error) {
 	choices, err := m.SelectEgressCandidates(region, strategy, residential)
@@ -251,12 +329,18 @@ func (m *Manager) SelectEgressCandidates(region string, strategy string, residen
 	if choices := m.orderEgressChoices(m.entryChoices(region, residential), strategy, EgressGroup(region, residential)); len(choices) > 0 {
 		return choices, nil
 	}
+	if choices := m.orderEgressChoices(m.tryOfflineEntryChoices(region, residential), strategy, EgressGroup(region, residential)); len(choices) > 0 {
+		return choices, nil
+	}
 	if choices := m.templateChoices(region, residential); len(choices) > 0 {
 		return choices, nil
 	}
 
 	if !residential {
 		if choices := m.orderEgressChoices(m.entryChoices(region, true), strategy, EgressGroup(region, true)); len(choices) > 0 {
+			return choices, nil
+		}
+		if choices := m.orderEgressChoices(m.tryOfflineEntryChoices(region, true), strategy, EgressGroup(region, true)); len(choices) > 0 {
 			return choices, nil
 		}
 		if choices := m.templateChoices(region, true); len(choices) > 0 {
@@ -334,6 +418,50 @@ func (m *Manager) entryChoices(region string, residential bool) []*EgressChoice 
 		return choices[i].PoolName < choices[j].PoolName
 	})
 	return choices
+}
+
+func (m *Manager) tryOfflineEntryChoices(region string, residential bool) []*EgressChoice {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var allMatching int
+	var fallback *EgressChoice
+	for poolName, pool := range m.pools {
+		if pool.Config == nil || (pool.Config.Source != "static" && pool.Config.Source != "subscription") {
+			continue
+		}
+		if !poolEnabled(pool.Config) {
+			continue
+		}
+
+		pool.mu.RLock()
+		for _, entry := range pool.Entries {
+			if entry == nil || entry.Node == nil || !entry.Enabled {
+				continue
+			}
+			if entry.Region != region || entry.Residential != residential {
+				continue
+			}
+			allMatching++
+			if pool.Config.Source == "subscription" && pool.Config.TryOffline && !entry.Alive {
+				fallback = &EgressChoice{
+					Dialer:      entry.Dialer,
+					PoolName:    poolName,
+					NodeName:    entry.Node.Name,
+					Source:      pool.Config.Source,
+					Region:      region,
+					Group:       EgressGroup(region, residential),
+					Residential: residential,
+					Latency:     entry.Latency,
+				}
+			}
+		}
+		pool.mu.RUnlock()
+	}
+	if allMatching == 1 && fallback != nil {
+		return []*EgressChoice{fallback}
+	}
+	return nil
 }
 
 func (m *Manager) anyEntryChoices(residential bool, maxLatency time.Duration) []*EgressChoice {
@@ -697,7 +825,7 @@ func (m *Manager) StartSubscriptionUpdater() {
 			continue
 		}
 
-		interval, err := time.ParseDuration(pool.Config.UpdateInterval)
+		interval, err := ParseDurationWithDays(pool.Config.UpdateInterval)
 		if err != nil {
 			log.Printf("invalid update_interval for %s: %v", name, err)
 			continue
