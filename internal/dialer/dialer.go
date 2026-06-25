@@ -43,7 +43,12 @@ func NewDialer(node *Node) (Dialer, error) {
 		return NewSOCKS5Dialer(node)
 	case "http_proxy", "http":
 		return NewHTTPProxyDialer(node)
-	case "ss", "shadowsocks", "vmess", "vless", "trojan", "hysteria2", "hy2", "anytls", "tuic":
+	case "vless":
+		if isXHTTPTransport(node) {
+			return NewVLESSXHTTPDialer(node)
+		}
+		return NewSingBoxDialer(node)
+	case "ss", "shadowsocks", "vmess", "trojan", "hysteria2", "hy2", "anytls", "tuic":
 		return NewSingBoxDialer(node)
 	default:
 		return nil, fmt.Errorf("unsupported node type: %s", node.Type)

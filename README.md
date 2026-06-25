@@ -130,7 +130,7 @@ Docker Hub 自动发布详见 [docs/dockerhub-release.md](docs/dockerhub-release
 - `anytls`
 - `tuic`
 
-`vmess` / `vless` / `trojan` 支持常见 V2Ray 传输参数：TCP、WebSocket、gRPC、HTTP/H2、HTTPUpgrade、QUIC。`vless` 支持 TLS 和 Reality；`hysteria2` 支持 Shadowrocket 常见的 `mport=16001-17000` 端口跳跃写法；`anytls` / `tuic` 使用 sing-box outbound 并默认启用 TLS。Clash YAML 的 `fingerprint` 会作为证书 SHA-256 pinning 指纹保留，不再当成 uTLS 指纹传给 sing-box；订阅中的未知 uTLS 指纹值会被忽略，避免正常节点被跳过。当前 sing-box 版本不支持 `xhttp` / `splithttp`，订阅中这类节点会被跳过并在订阅池错误信息中展示原因。Reality 和订阅中的 `fp/client-fingerprint` 需要使用 `-tags with_utls` 构建，`./build.sh` 已默认启用。
+`vmess` / `vless` / `trojan` 支持常见 V2Ray 传输参数：TCP、WebSocket、gRPC、HTTP/H2、HTTPUpgrade、QUIC。`vless` 支持 TLS、Reality 和 `xhttp` / `splithttp` 的 `packet-up`、`stream-up` 模式；`hysteria2` 支持 Shadowrocket 常见的 `mport=16001-17000` 端口跳跃写法；`anytls` / `tuic` 使用 sing-box outbound 并默认启用 TLS。Clash YAML 的 `fingerprint` 会作为证书 SHA-256 pinning 指纹保留，不再当成 uTLS 指纹传给 sing-box；订阅中的未知 uTLS 指纹值会被忽略，避免正常节点被跳过。当前 sing-box 版本不原生支持 `xhttp` / `splithttp`，`vless+xhttp` 由 Chijie 的专用拨号器接入；其他协议的 `xhttp` 节点会被跳过并在订阅池错误信息中展示原因。Reality 和订阅中的 `fp/client-fingerprint` 需要使用 `-tags with_utls` 构建，`./build.sh` 已默认启用。
 
 订阅导入支持 Clash YAML、Base64 URI 列表、未 Base64 包装的纯 URI 列表。URI 列表支持 `ss`、`vmess`、`vless`、`trojan`、`hysteria2` / `hy2`、`anytls` 和 `tuic`。Shadowsocks URI 支持 `ss://userinfo@host:port?plugin=...` 和 SIP002 常见的 `ss://userinfo@host:port/?plugin=...` 写法；`simple-obfs` 插件名会规范化为 sing-box 可识别的 `obfs-local`。订阅拉取使用 `clash-verge/v2.0.0` User-Agent，以兼容会按客户端 UA 返回不同节点集合的订阅服务。单个订阅池可填写多个订阅地址，使用换行、英文逗号或 `|` 分隔；部分订阅地址失败时，已成功解析的节点仍会进入该池。订阅地址必须是 `http` / `https` 公网目标，响应体超过 4 MB 时会拒绝解析。
 

@@ -395,3 +395,10 @@
 - [x] Clash YAML 的 `fingerprint` 与 `client-fingerprint` 分离处理，证书 SHA-256 pinning 指纹不再误传给 uTLS
 - [x] 订阅中的未知 uTLS 指纹值不再导致节点被跳过
 - [x] 补充字符串端口和未知 uTLS 指纹的单元测试
+
+## P41 — VLESS XHTTP 订阅兼容 ✅
+日期：2026-06-25
+
+- [x] 新增 `vless+xhttp` 专用拨号器，支持 `packet-up` 和 TLS `stream-up`
+- [x] Clash YAML 的 `xhttp-opts` 支持解析 `path`、`mode` 和 `download-settings`
+- [x] VLESS URI 支持读取 `mode`、`path` 和 `extra` 中的 XHTTP 参数

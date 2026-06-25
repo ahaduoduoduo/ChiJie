@@ -285,6 +285,21 @@ type ClashProxy struct {
 	GrpcOpts *struct {
 		GrpcServiceName string `yaml:"grpc-service-name"`
 	} `yaml:"grpc-opts"`
+	XHTTPOpts *struct {
+		Path             string            `yaml:"path"`
+		Mode             string            `yaml:"mode"`
+		Host             string            `yaml:"host"`
+		Method           string            `yaml:"method"`
+		Headers          map[string]string `yaml:"headers"`
+		NoGRPCHeader     bool              `yaml:"no-grpc-header"`
+		NoSSEHeader      bool              `yaml:"no-sse-header"`
+		DownloadSettings *struct {
+			Path       string `yaml:"path"`
+			Server     string `yaml:"server"`
+			Port       any    `yaml:"port"`
+			ServerName string `yaml:"servername"`
+		} `yaml:"download-settings"`
+	} `yaml:"xhttp-opts"`
 	RealityOpts *struct {
 		PublicKey string `yaml:"public-key"`
 		ShortID   string `yaml:"short-id"`
@@ -405,10 +420,52 @@ func applyClashCommonExtras(node *dialer.Node, proxy *ClashProxy) {
 	if proxy.GrpcOpts != nil {
 		setExtra(node.Extra, "service_name", proxy.GrpcOpts.GrpcServiceName)
 	}
+	if proxy.XHTTPOpts != nil {
+		applyClashXHTTPExtras(node, proxy.XHTTPOpts)
+	}
 	if proxy.RealityOpts != nil {
 		node.Extra["security"] = "reality"
 		setExtra(node.Extra, "public_key", proxy.RealityOpts.PublicKey)
 		setExtra(node.Extra, "short_id", proxy.RealityOpts.ShortID)
+	}
+}
+
+func applyClashXHTTPExtras(node *dialer.Node, opts *struct {
+	Path             string            `yaml:"path"`
+	Mode             string            `yaml:"mode"`
+	Host             string            `yaml:"host"`
+	Method           string            `yaml:"method"`
+	Headers          map[string]string `yaml:"headers"`
+	NoGRPCHeader     bool              `yaml:"no-grpc-header"`
+	NoSSEHeader      bool              `yaml:"no-sse-header"`
+	DownloadSettings *struct {
+		Path       string `yaml:"path"`
+		Server     string `yaml:"server"`
+		Port       any    `yaml:"port"`
+		ServerName string `yaml:"servername"`
+	} `yaml:"download-settings"`
+}) {
+	setExtra(node.Extra, "path", opts.Path)
+	setExtra(node.Extra, "xhttp_path", opts.Path)
+	setExtra(node.Extra, "xhttp_mode", opts.Mode)
+	setExtra(node.Extra, "xhttp_host", opts.Host)
+	setExtra(node.Extra, "xhttp_method", opts.Method)
+	if opts.NoGRPCHeader {
+		node.Extra["xhttp_no_grpc_header"] = "true"
+	}
+	if opts.NoSSEHeader {
+		node.Extra["xhttp_no_sse_header"] = "true"
+	}
+	if len(opts.Headers) > 0 {
+		if encoded, err := json.Marshal(opts.Headers); err == nil {
+			node.Extra["xhttp_headers"] = string(encoded)
+		}
+	}
+	if opts.DownloadSettings != nil {
+		setExtra(node.Extra, "xhttp_download_path", opts.DownloadSettings.Path)
+		setExtra(node.Extra, "xhttp_download_server", opts.DownloadSettings.Server)
+		setExtra(node.Extra, "xhttp_download_port", scalarToString(opts.DownloadSettings.Port))
+		setExtra(node.Extra, "xhttp_download_servername", opts.DownloadSettings.ServerName)
 	}
 }
 
@@ -716,27 +773,56 @@ func parseVLESSURI(uri string) (*dialer.Node, error) {
 
 	query := parsed.Query()
 
+	extra := map[string]string{
+		"uuid":         uuid,
+		"flow":         query.Get("flow"),
+		"security":     query.Get("security"),
+		"sni":          util.FirstNonEmpty(query.Get("sni"), query.Get("servername")),
+		"network":      query.Get("type"),
+		"host":         query.Get("host"),
+		"path":         query.Get("path"),
+		"service_name": util.FirstNonEmpty(query.Get("serviceName"), query.Get("service_name")),
+		"alpn":         query.Get("alpn"),
+		"fingerprint":  util.FirstNonEmpty(query.Get("fp"), query.Get("fingerprint")),
+		"xhttp_mode":   query.Get("mode"),
+		"xhttp_path":   query.Get("path"),
+		"xhttp_host":   query.Get("host"),
+		"skip_verify":  util.FirstNonEmpty(query.Get("allowInsecure"), query.Get("insecure")),
+		"public_key":   util.FirstNonEmpty(query.Get("pbk"), query.Get("publicKey"), query.Get("public_key")),
+		"short_id":     util.FirstNonEmpty(query.Get("sid"), query.Get("shortId"), query.Get("short_id")),
+	}
+	applyVLESSXHTTPURIExtra(extra, query.Get("extra"))
+
 	return &dialer.Node{
 		Name:   name,
 		Type:   "vless",
 		Server: server,
 		Port:   port,
-		Extra: map[string]string{
-			"uuid":         uuid,
-			"flow":         query.Get("flow"),
-			"security":     query.Get("security"),
-			"sni":          util.FirstNonEmpty(query.Get("sni"), query.Get("servername")),
-			"network":      query.Get("type"),
-			"host":         query.Get("host"),
-			"path":         query.Get("path"),
-			"service_name": util.FirstNonEmpty(query.Get("serviceName"), query.Get("service_name")),
-			"alpn":         query.Get("alpn"),
-			"fingerprint":  util.FirstNonEmpty(query.Get("fp"), query.Get("fingerprint")),
-			"skip_verify":  util.FirstNonEmpty(query.Get("allowInsecure"), query.Get("insecure")),
-			"public_key":   util.FirstNonEmpty(query.Get("pbk"), query.Get("publicKey"), query.Get("public_key")),
-			"short_id":     util.FirstNonEmpty(query.Get("sid"), query.Get("shortId"), query.Get("short_id")),
-		},
+		Extra:  extra,
 	}, nil
+}
+
+func applyVLESSXHTTPURIExtra(extra map[string]string, raw string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return
+	}
+	extra["xhttp_extra"] = raw
+	var config struct {
+		DownloadSettings *struct {
+			Path       string `json:"path"`
+			Server     string `json:"server"`
+			Port       any    `json:"port"`
+			ServerName string `json:"servername"`
+		} `json:"downloadSettings"`
+	}
+	if err := json.Unmarshal([]byte(raw), &config); err != nil || config.DownloadSettings == nil {
+		return
+	}
+	setExtra(extra, "xhttp_download_path", config.DownloadSettings.Path)
+	setExtra(extra, "xhttp_download_server", config.DownloadSettings.Server)
+	setExtra(extra, "xhttp_download_port", scalarToString(config.DownloadSettings.Port))
+	setExtra(extra, "xhttp_download_servername", config.DownloadSettings.ServerName)
 }
 
 // parseHysteria2URI 解析 hysteria2:// / hy2:// URI

@@ -848,9 +848,9 @@ func TestRejectRegexFiltersSubscriptionNodes(t *testing.T) {
 func TestBuildSubscriptionEntriesReportsUnsupportedTransports(t *testing.T) {
 	nodes := []dialer.Node{
 		{
-			Name:   "vless-xhttp",
-			Type:   "vless",
-			Server: "vless.example.com",
+			Name:   "vmess-xhttp",
+			Type:   "vmess",
+			Server: "vmess.example.com",
 			Port:   443,
 			Extra: map[string]string{
 				"uuid":     "11111111-1111-1111-1111-111111111111",
@@ -867,6 +867,33 @@ func TestBuildSubscriptionEntriesReportsUnsupportedTransports(t *testing.T) {
 	}
 	if !strings.Contains(warning, "loaded 0 supported nodes") || !strings.Contains(warning, `unsupported v2ray transport "xhttp"`) {
 		t.Fatalf("unexpected warning: %q", warning)
+	}
+}
+
+func TestBuildSubscriptionEntriesLoadsVLESSXHTTP(t *testing.T) {
+	nodes := []dialer.Node{
+		{
+			Name:   "vless-xhttp",
+			Type:   "vless",
+			Server: "vless.example.com",
+			Port:   443,
+			Extra: map[string]string{
+				"uuid":       "11111111-1111-1111-1111-111111111111",
+				"security":   "tls",
+				"sni":        "vless.example.com",
+				"network":    "xhttp",
+				"xhttp_mode": "stream-up",
+				"xhttp_path": "/path",
+			},
+		},
+	}
+
+	entries, warning := buildSubscriptionEntries(nodes, &PoolConfig{Source: "subscription"})
+	if warning != "" {
+		t.Fatalf("unexpected warning: %q", warning)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected xhttp node to load, got %d entries", len(entries))
 	}
 }
 

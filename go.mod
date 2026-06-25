@@ -3,18 +3,21 @@ module chijie
 go 1.25.9
 
 require (
+	github.com/andybalholm/brotli v1.1.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
+	github.com/justinwoo280/sing-xhttp v0.0.0-20260531084226-8be0a0f52d20
+	github.com/klauspost/compress v1.18.0
 	github.com/miekg/dns v1.1.72
 	github.com/refraction-networking/utls v1.8.2
 	github.com/sagernet/sing v0.8.9
 	github.com/sagernet/sing-box v1.13.11
+	github.com/sagernet/sing-vmess v0.2.8-0.20250909125414-3aed155119a1
 	golang.org/x/net v0.52.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/anytls/sing-anytls v0.0.11 // indirect
 	github.com/caddyserver/certmagic v0.25.2 // indirect
 	github.com/caddyserver/zerossl v0.1.5 // indirect
@@ -30,7 +33,6 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
-	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/libdns/acmedns v0.5.0 // indirect
 	github.com/libdns/alidns v1.0.6 // indirect
@@ -52,7 +54,6 @@ require (
 	github.com/sagernet/sing-shadowsocks v0.2.9 // indirect
 	github.com/sagernet/sing-shadowsocks2 v0.2.1 // indirect
 	github.com/sagernet/sing-tun v0.8.9 // indirect
-	github.com/sagernet/sing-vmess v0.2.8-0.20250909125414-3aed155119a1 // indirect
 	github.com/sagernet/smux v1.5.50-sing-box-mod.1 // indirect
 	github.com/sagernet/ws v0.0.0-20231204124109-acfe8907c854 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect

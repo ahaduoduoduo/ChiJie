@@ -93,6 +93,22 @@ proxies:
       path: /edge
       headers:
         Host: cdn.example.com
+  - name: vless-xhttp
+    type: vless
+    server: xhttp.example.com
+    port: "443"
+    uuid: 11111111-1111-1111-1111-111111111111
+    tls: true
+    servername: update.microsoft.com
+    network: xhttp
+    xhttp-opts:
+      path: /path
+      mode: stream-up
+      download-settings:
+        path: /path
+        server: download.example.com
+        port: 443
+        servername: update.microsoft.com
   - name: hy2-node
     type: hysteria2
     server: hy.example.com
@@ -110,8 +126,8 @@ proxies:
 	if err != nil {
 		t.Fatalf("parse clash yaml: %v", err)
 	}
-	if len(nodes) != 3 {
-		t.Fatalf("expected 3 nodes, got %d", len(nodes))
+	if len(nodes) != 4 {
+		t.Fatalf("expected 4 nodes, got %d", len(nodes))
 	}
 	if nodes[1].Port != 443 {
 		t.Fatalf("string port not parsed: %#v", nodes[1])
@@ -122,8 +138,11 @@ proxies:
 	if nodes[1].Extra["client_fingerprint"] != "chrome" || nodes[1].Extra["certificate_fingerprint"] == "" {
 		t.Fatalf("fingerprint fields not separated: %#v", nodes[1].Extra)
 	}
-	if nodes[2].Type != "hysteria2" || nodes[2].Extra["skip_verify"] != "true" || nodes[2].Extra["obfs_password"] != "obfs-pass" {
-		t.Fatalf("hysteria2 clash extras not parsed: %#v", nodes[2])
+	if nodes[2].Extra["network"] != "xhttp" || nodes[2].Extra["xhttp_mode"] != "stream-up" || nodes[2].Extra["xhttp_download_server"] != "download.example.com" {
+		t.Fatalf("xhttp clash extras not parsed: %#v", nodes[2].Extra)
+	}
+	if nodes[3].Type != "hysteria2" || nodes[3].Extra["skip_verify"] != "true" || nodes[3].Extra["obfs_password"] != "obfs-pass" {
+		t.Fatalf("hysteria2 clash extras not parsed: %#v", nodes[3])
 	}
 }
 
@@ -238,6 +257,16 @@ func TestFetchSupportsBase64AnyTLSAndTUICURIList(t *testing.T) {
 	}
 	if nodes[1].Extra["congestion_control"] != "bbr" || nodes[1].Extra["udp_relay_mode"] != "native" || nodes[1].Extra["alpn"] != "h3" {
 		t.Fatalf("tuic extras not parsed: %#v", nodes[1].Extra)
+	}
+}
+
+func TestParseVLESSURISupportsXHTTPExtra(t *testing.T) {
+	node, err := parseVLESSURI("vless://11111111-1111-1111-1111-111111111111@xhttp.example.com:443?type=xhttp&security=tls&sni=update.microsoft.com&path=%2Fpath&mode=stream-up&extra=%7B%22downloadSettings%22%3A%7B%22path%22%3A%22%2Fpath%22%2C%22server%22%3A%22download.example.com%22%2C%22port%22%3A443%2C%22servername%22%3A%22update.microsoft.com%22%7D%7D#xhttp")
+	if err != nil {
+		t.Fatalf("parse vless xhttp uri: %v", err)
+	}
+	if node.Extra["network"] != "xhttp" || node.Extra["xhttp_mode"] != "stream-up" || node.Extra["xhttp_download_server"] != "download.example.com" {
+		t.Fatalf("xhttp uri extras not parsed: %#v", node.Extra)
 	}
 }
 

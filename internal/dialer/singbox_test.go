@@ -119,6 +119,20 @@ func TestNewSingBoxDialerSupportsCommonProtocols(t *testing.T) {
 				"client_fingerprint": "1d7995901a93bada6d17f10289441793e8ec54ee314d9f04f3a9d05daa622331",
 			},
 		},
+		{
+			Name:   "vless-xhttp",
+			Type:   "vless",
+			Server: "vless-xhttp.example.com",
+			Port:   443,
+			Extra: map[string]string{
+				"uuid":       "11111111-1111-1111-1111-111111111111",
+				"security":   "tls",
+				"sni":        "vless-xhttp.example.com",
+				"network":    "xhttp",
+				"xhttp_mode": "stream-up",
+				"xhttp_path": "/path",
+			},
+		},
 	}
 
 	for _, node := range nodes {
