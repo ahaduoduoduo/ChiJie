@@ -25,11 +25,11 @@ function ToastProvider({ children }) {
 }
 const useToast = () => React.useContext(ToastCtx).push;
 
-function Modal({ open, onClose, title, children, footer }) {
+function Modal({ open, onClose, title, children, footer, className }) {
   if (!open) return null;
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+      <div className={`modal ${className || ""}`.trim()} onClick={e => e.stopPropagation()}>
         <div className="modal-h"><h2>{title}</h2><button className="btn-icon ml-auto" onClick={onClose}><Ic.x /></button></div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}

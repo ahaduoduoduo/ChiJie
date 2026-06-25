@@ -361,7 +361,7 @@ func buildTLSOptions(node *Node, defaultEnabled bool) map[string]any {
 		tlsOptions["alpn"] = util.SplitList(alpn)
 	}
 	realityEnabled := security == "reality" || node.Extra["reality"] == "true" || node.Extra["public_key"] != "" || node.Extra["pbk"] != ""
-	fingerprint := util.FirstNonEmpty(node.Extra["fingerprint"], node.Extra["client_fingerprint"], node.Extra["client-fingerprint"], node.Extra["fp"])
+	fingerprint := normalizeUTLSFingerprint(util.FirstNonEmpty(node.Extra["fingerprint"], node.Extra["client_fingerprint"], node.Extra["client-fingerprint"], node.Extra["fp"]))
 	if realityEnabled && fingerprint == "" {
 		fingerprint = "chrome"
 	}
@@ -379,6 +379,20 @@ func buildTLSOptions(node *Node, defaultEnabled bool) map[string]any {
 		}
 	}
 	return tlsOptions
+}
+
+func normalizeUTLSFingerprint(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "", "none", "false", "off", "disable", "disabled":
+		return ""
+	case "chrome_psk", "chrome_psk_shuffle", "chrome_padding_psk_shuffle", "chrome_pq", "chrome_pq_psk":
+		return value
+	case "chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android", "random", "randomized":
+		return value
+	default:
+		return ""
+	}
 }
 
 func buildV2RayTransport(node *Node) map[string]any {

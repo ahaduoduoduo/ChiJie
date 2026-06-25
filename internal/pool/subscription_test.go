@@ -80,11 +80,12 @@ proxies:
   - name: vless-reality
     type: vless
     server: vless.example.com
-    port: 443
+    port: "443"
     uuid: 11111111-1111-1111-1111-111111111111
     network: ws
     servername: www.example.com
     client-fingerprint: chrome
+    fingerprint: 1d7995901a93bada6d17f10289441793e8ec54ee314d9f04f3a9d05daa622331
     reality-opts:
       public-key: public-key
       short-id: abcd
@@ -112,8 +113,14 @@ proxies:
 	if len(nodes) != 3 {
 		t.Fatalf("expected 3 nodes, got %d", len(nodes))
 	}
+	if nodes[1].Port != 443 {
+		t.Fatalf("string port not parsed: %#v", nodes[1])
+	}
 	if nodes[1].Extra["security"] != "reality" || nodes[1].Extra["public_key"] != "public-key" || nodes[1].Extra["host"] != "cdn.example.com" {
 		t.Fatalf("vless reality clash extras not parsed: %#v", nodes[1].Extra)
+	}
+	if nodes[1].Extra["client_fingerprint"] != "chrome" || nodes[1].Extra["certificate_fingerprint"] == "" {
+		t.Fatalf("fingerprint fields not separated: %#v", nodes[1].Extra)
 	}
 	if nodes[2].Type != "hysteria2" || nodes[2].Extra["skip_verify"] != "true" || nodes[2].Extra["obfs_password"] != "obfs-pass" {
 		t.Fatalf("hysteria2 clash extras not parsed: %#v", nodes[2])

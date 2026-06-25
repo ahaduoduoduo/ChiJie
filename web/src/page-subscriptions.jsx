@@ -6,6 +6,7 @@ function PageSubscriptions({ state, dispatch }) {
   const subs = pools.filter(p => p.source === "subscription");
   const [addOpen, setAddOpen] = React.useState(false);
   const [openSub, setOpenSub] = React.useState(null);
+  const [errorSub, setErrorSub] = React.useState(null);
   const [expandedNodes, setExpandedNodes] = React.useState({});
   const toast = useToast();
 
@@ -28,6 +29,7 @@ function PageSubscriptions({ state, dispatch }) {
           const regions = Array.from(new Set(s.nodes.map(n => n.region))).filter(Boolean);
           const expanded = !!expandedNodes[s.name];
           const visibleNodes = expanded ? s.nodes : s.nodes.slice(0, 14);
+          const errorSummary = subscriptionErrorSummary(s.last_error);
           return (
             <div key={s.name} className="card subscription-card">
               <div className="card-h bordered subscription-card-header">
@@ -48,7 +50,13 @@ function PageSubscriptions({ state, dispatch }) {
                 <div className="subscription-summary-item">
                   <div className="subscription-section-label">Source</div>
                   <div className="mono truncate subscription-url">{s.url}</div>
-                  {s.last_error && <div className="subscription-error"><span />{s.last_error}</div>}
+                  {s.last_error && (
+                    <button className="subscription-error-button" onClick={() => setErrorSub(s)}>
+                      <Ic.alert/>
+                      <span className="subscription-error-summary">{errorSummary}</span>
+                      <span className="subscription-error-action">View</span>
+                    </button>
+                  )}
                 </div>
                 <div className="subscription-summary-item">
                   <div className="subscription-section-label">Nodes online</div>
@@ -96,8 +104,29 @@ function PageSubscriptions({ state, dispatch }) {
         {openSub && <SubEditor sub={openSub} dispatch={dispatch} onClose={() => setOpenSub(null)} toast={toast}/>}
       </Drawer>
 
+      <SubscriptionErrorModal sub={errorSub} onClose={() => setErrorSub(null)} />
       <AddSubscriptionModal open={addOpen} onClose={() => setAddOpen(false)} dispatch={dispatch} toast={toast}/>
     </div>
+  );
+}
+
+function subscriptionErrorSummary(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > 96 ? `${text.slice(0, 93)}...` : text;
+}
+
+function SubscriptionErrorModal({ sub, onClose }) {
+  return (
+    <Modal open={!!sub} onClose={onClose} title={sub ? `${sub.name} error` : "Subscription error"} className="wide">
+      <div className="col gap-12">
+        <div>
+          <div className="subscription-section-label">Source</div>
+          <div className="mono subscription-url" style={{overflowWrap:"anywhere", whiteSpace:"normal"}}>{sub?.url}</div>
+        </div>
+        <pre className="subscription-error-detail">{sub?.last_error || ""}</pre>
+      </div>
+    </Modal>
   );
 }
 

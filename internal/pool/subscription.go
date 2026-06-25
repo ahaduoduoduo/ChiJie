@@ -240,11 +240,11 @@ type ClashProxy struct {
 	Name              string `yaml:"name"`
 	Type              string `yaml:"type"`
 	Server            string `yaml:"server"`
-	Port              int    `yaml:"port"`
+	Port              any    `yaml:"port"`
 	Cipher            string `yaml:"cipher"`
 	Password          string `yaml:"password"`
 	UUID              string `yaml:"uuid"`
-	AlterID           int    `yaml:"alterId"`
+	AlterID           any    `yaml:"alterId"`
 	Security          string `yaml:"security"`
 	TLS               bool   `yaml:"tls"`
 	SkipCertVerify    bool   `yaml:"skip-cert-verify"`
@@ -295,7 +295,7 @@ func clashProxyToNode(proxy *ClashProxy) (*dialer.Node, error) {
 	node := &dialer.Node{
 		Name:   proxy.Name,
 		Server: proxy.Server,
-		Port:   proxy.Port,
+		Port:   parseInterfaceInt(proxy.Port),
 		Extra:  make(map[string]string),
 	}
 
@@ -311,7 +311,7 @@ func clashProxyToNode(proxy *ClashProxy) (*dialer.Node, error) {
 		node.Type = "vmess"
 		node.Extra["uuid"] = proxy.UUID
 		node.Extra["security"] = proxy.Security
-		node.Extra["alter_id"] = strconv.Itoa(proxy.AlterID)
+		node.Extra["alter_id"] = strconv.Itoa(parseInterfaceInt(proxy.AlterID))
 		applyClashCommonExtras(node, proxy)
 
 	case "trojan":
@@ -387,7 +387,8 @@ func applyClashCommonExtras(node *dialer.Node, proxy *ClashProxy) {
 	if proxy.SkipCertVerify {
 		node.Extra["skip_verify"] = "true"
 	}
-	setExtra(node.Extra, "client_fingerprint", util.FirstNonEmpty(proxy.ClientFingerprint, proxy.Fingerprint))
+	setExtra(node.Extra, "client_fingerprint", proxy.ClientFingerprint)
+	setExtra(node.Extra, "certificate_fingerprint", proxy.Fingerprint)
 	setExtra(node.Extra, "alpn", stringListToCSV(proxy.ALPN))
 
 	if proxy.WSOpts != nil {

@@ -387,3 +387,11 @@
 
 - [x] 订阅拉取 UA 从 Chrome 类 UA 改为 `clash-verge/v2.0.0`，避免部分订阅源只返回精简节点集合
 - [x] 对比 `clash-verge/v2.0.0`、Shadowrocket 和 Chrome UA 在同一订阅链接下的节点数量差异
+
+## P40 — Clash 订阅兼容性修复 ✅
+日期：2026-06-25
+
+- [x] Clash YAML 的 `port: "443"` 字符串端口支持解析为整数端口
+- [x] Clash YAML 的 `fingerprint` 与 `client-fingerprint` 分离处理，证书 SHA-256 pinning 指纹不再误传给 uTLS
+- [x] 订阅中的未知 uTLS 指纹值不再导致节点被跳过
+- [x] 补充字符串端口和未知 uTLS 指纹的单元测试

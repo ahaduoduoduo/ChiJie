@@ -80,6 +80,7 @@ func TestNewSingBoxDialerSupportsCommonProtocols(t *testing.T) {
 				"up_mbps":       "20",
 				"down_mbps":     "100",
 				"ports":         "16001-17000",
+				"fingerprint":   "f766ff8b412486b706865c6cbc3db24958b60748cefdb9d4e5a1799a75034b3d",
 			},
 		},
 		{
@@ -104,6 +105,18 @@ func TestNewSingBoxDialerSupportsCommonProtocols(t *testing.T) {
 				"congestion_control": "bbr",
 				"udp_relay_mode":     "native",
 				"alpn":               "h3",
+			},
+		},
+		{
+			Name:   "vless-unknown-utls",
+			Type:   "vless",
+			Server: "vless-hash.example.com",
+			Port:   443,
+			Extra: map[string]string{
+				"uuid":               "11111111-1111-1111-1111-111111111111",
+				"security":           "tls",
+				"sni":                "vless-hash.example.com",
+				"client_fingerprint": "1d7995901a93bada6d17f10289441793e8ec54ee314d9f04f3a9d05daa622331",
 			},
 		},
 	}
