@@ -1408,6 +1408,9 @@ func filterByRegion(nodes []dialer.Node, regions []string) []dialer.Node {
 
 func detectRegionFromNodeName(name string) string {
 	if region := flagRegionCode(name); region != "" {
+		if region == "CN" && containsRegionCodeToken(strings.ToUpper(name), "TW") {
+			return "TW"
+		}
 		return region
 	}
 

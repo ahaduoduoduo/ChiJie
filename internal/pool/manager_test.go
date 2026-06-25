@@ -907,6 +907,8 @@ func TestRegionDetectionAvoidsPlainWordFalsePositives(t *testing.T) {
 		{name: "hk-socks", want: "HK"},
 		{name: "US01 premium", want: "US"},
 		{name: "UK-01", want: "GB"},
+		{name: "🇨🇳 TW 01", want: "TW"},
+		{name: "🇨🇳 中国 01", want: "CN"},
 	}
 
 	for _, tc := range cases {
