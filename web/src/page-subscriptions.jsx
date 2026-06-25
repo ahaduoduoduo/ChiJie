@@ -6,6 +6,7 @@ function PageSubscriptions({ state, dispatch }) {
   const subs = pools.filter(p => p.source === "subscription");
   const [addOpen, setAddOpen] = React.useState(false);
   const [openSub, setOpenSub] = React.useState(null);
+  const [expandedNodes, setExpandedNodes] = React.useState({});
   const toast = useToast();
 
   return (
@@ -25,6 +26,8 @@ function PageSubscriptions({ state, dispatch }) {
           const total = s.nodes.length;
           const online = s.nodes.filter(n => n.alive && n.enabled).length;
           const regions = Array.from(new Set(s.nodes.map(n => n.region))).filter(Boolean);
+          const expanded = !!expandedNodes[s.name];
+          const visibleNodes = expanded ? s.nodes : s.nodes.slice(0, 14);
           return (
             <div key={s.name} className="card subscription-card">
               <div className="card-h bordered subscription-card-header">
@@ -71,13 +74,18 @@ function PageSubscriptions({ state, dispatch }) {
 
               <div className="subscription-node-strip">
                 <span className="subscription-section-label subscription-node-label">Nodes</span>
-                {s.nodes.slice(0, 14).map(n => (
+                {visibleNodes.map(n => (
                   <span key={n.id} className="pill mono subscription-node-pill" style={{opacity: n.alive && n.enabled ? 1 : 0.45}}>
                     <span style={{display:"inline-block",width:5,height:5,borderRadius:"50%",background: n.alive && n.enabled ? "#fafafa" : "var(--fg-3)", boxShadow: n.alive && n.enabled ? "0 0 4px rgba(255,255,255,0.5)" : "none"}}/>
                     <span className="truncate subscription-node-name">{n.name}</span>
                   </span>
                 ))}
-                {s.nodes.length > 14 && <span className="muted-2 mono" style={{fontSize:11}}>+{s.nodes.length - 14}</span>}
+                {s.nodes.length > 14 && (
+                  <button className="btn sm ghost mono" style={{height:26, padding:"0 9px", fontSize:11}}
+                    onClick={() => setExpandedNodes(v => ({ ...v, [s.name]: !expanded }))}>
+                    {expanded ? "Show less" : `+${s.nodes.length - 14}`}
+                  </button>
+                )}
               </div>
             </div>
           );

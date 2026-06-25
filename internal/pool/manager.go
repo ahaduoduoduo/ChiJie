@@ -326,24 +326,12 @@ func (m *Manager) SelectEgressCandidates(region string, strategy string, residen
 	}
 	strategy = NormalizeStrategy(strategy)
 
-	if choices := m.orderEgressChoices(m.entryChoices(region, residential), strategy, EgressGroup(region, residential)); len(choices) > 0 {
-		return choices, nil
-	}
-	if choices := m.orderEgressChoices(m.tryOfflineEntryChoices(region, residential), strategy, EgressGroup(region, residential)); len(choices) > 0 {
-		return choices, nil
-	}
-	if choices := m.templateChoices(region, residential); len(choices) > 0 {
+	if choices := m.egressCandidateGroup(region, strategy, residential, false); len(choices) > 0 {
 		return choices, nil
 	}
 
 	if !residential {
-		if choices := m.orderEgressChoices(m.entryChoices(region, true), strategy, EgressGroup(region, true)); len(choices) > 0 {
-			return choices, nil
-		}
-		if choices := m.orderEgressChoices(m.tryOfflineEntryChoices(region, true), strategy, EgressGroup(region, true)); len(choices) > 0 {
-			return choices, nil
-		}
-		if choices := m.templateChoices(region, true); len(choices) > 0 {
+		if choices := m.egressCandidateGroup(region, strategy, true, false); len(choices) > 0 {
 			return choices, nil
 		}
 	}
@@ -352,6 +340,52 @@ func (m *Manager) SelectEgressCandidates(region string, strategy string, residen
 		return nil, fmt.Errorf("no residential nodes or residential templates available for region %s", region)
 	}
 	return nil, fmt.Errorf("no nodes or templates available for region %s", region)
+}
+
+// SelectEgressCandidatesWithTemplateFallback 返回显式地区出口候选，并在可用节点候选之后追加同类型模板。
+// /proxy 会限制普通节点尝试数量；模板候选只在这些节点都失败后继续使用。
+func (m *Manager) SelectEgressCandidatesWithTemplateFallback(region string, strategy string, residential bool) ([]*EgressChoice, error) {
+	region = NormalizeRegionCode(region)
+	if region == "" {
+		return nil, fmt.Errorf("region must be a two-letter region code")
+	}
+	strategy = NormalizeStrategy(strategy)
+
+	if choices := m.egressCandidateGroup(region, strategy, residential, true); len(choices) > 0 {
+		return choices, nil
+	}
+
+	if !residential {
+		if choices := m.egressCandidateGroup(region, strategy, true, true); len(choices) > 0 {
+			return choices, nil
+		}
+	}
+
+	if residential {
+		return nil, fmt.Errorf("no residential nodes or residential templates available for region %s", region)
+	}
+	return nil, fmt.Errorf("no nodes or templates available for region %s", region)
+}
+
+func (m *Manager) egressCandidateGroup(region string, strategy string, residential bool, includeTemplatesAfterEntries bool) []*EgressChoice {
+	group := EgressGroup(region, residential)
+	templates := func() []*EgressChoice {
+		return m.templateChoices(region, residential)
+	}
+
+	if choices := m.orderEgressChoices(m.entryChoices(region, residential), strategy, group); len(choices) > 0 {
+		if includeTemplatesAfterEntries {
+			return append(choices, templates()...)
+		}
+		return choices
+	}
+	if choices := m.orderEgressChoices(m.tryOfflineEntryChoices(region, residential), strategy, group); len(choices) > 0 {
+		if includeTemplatesAfterEntries {
+			return append(choices, templates()...)
+		}
+		return choices
+	}
+	return templates()
 }
 
 // SelectAnyEgress 在不指定地区时选择一个非直连出口。maxLatency 为 0 时不限制延迟。
@@ -735,6 +769,7 @@ func (m *Manager) ListPools() []string {
 	for name := range m.pools {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
@@ -982,6 +1017,12 @@ func (m *Manager) GetPoolStatus() []PoolStatus {
 
 		result = append(result, ps)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Source != result[j].Source {
+			return result[i].Source < result[j].Source
+		}
+		return result[i].Name < result[j].Name
+	})
 	return result
 }
 
@@ -1005,6 +1046,35 @@ func (m *Manager) SetNodeEnabled(poolName, nodeName string, enabled bool) error 
 		}
 	}
 	return fmt.Errorf("node not found in pool %s: %s", poolName, nodeName)
+}
+
+// MarkNodeUnavailable 将一次 /proxy 出口执行失败对应的运行时节点立即标记为不可用。
+// 后台健康检查或手动测试后续成功时会再次把 Alive 恢复为 true。
+func (m *Manager) MarkNodeUnavailable(poolName, nodeName string) bool {
+	if m == nil || strings.TrimSpace(poolName) == "" || strings.TrimSpace(nodeName) == "" {
+		return false
+	}
+	m.mu.RLock()
+	pool, ok := m.pools[poolName]
+	m.mu.RUnlock()
+	if !ok || pool == nil {
+		return false
+	}
+
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	for _, entry := range pool.Entries {
+		if entry == nil || entry.Node == nil || entry.Node.Name != nodeName {
+			continue
+		}
+		if strings.EqualFold(entry.Node.Type, "direct") {
+			return false
+		}
+		entry.Alive = false
+		entry.FailCount++
+		return true
+	}
+	return false
 }
 
 func updateConfigNodeEnabled(cfg *PoolConfig, nodeName string, enabled bool) {

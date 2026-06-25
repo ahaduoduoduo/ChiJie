@@ -30,6 +30,7 @@ import (
 	"chijie/internal/fingerprint"
 	"chijie/internal/netguard"
 	"chijie/internal/pool"
+	proxyserver "chijie/internal/server"
 	"chijie/internal/traffic"
 	"chijie/internal/util"
 
@@ -60,6 +61,7 @@ type Server struct {
 	loginLimiter  *loginLimiter // 登录速率限制
 	runtimeMu     sync.RWMutex
 	runtimeInfo   RuntimeInfo
+	proxyRuntime  ProxySettingsRuntime
 }
 
 // RuntimeInfo 是 Admin System 页面展示的运行时配置摘要。
@@ -72,6 +74,12 @@ type RuntimeInfo struct {
 	LogOutput   string `json:"log_output"`
 	Version     string `json:"version"`
 	GoVersion   string `json:"go_version"`
+}
+
+// ProxySettingsRuntime 是 Admin API 用来读取和更新 /proxy 运行时配置的最小接口。
+type ProxySettingsRuntime interface {
+	ProxySettings() proxyserver.ProxySettings
+	UpdateProxySettings(proxyserver.ProxySettings)
 }
 
 // LoginLimitConfig 登录失败速率限制配置。
@@ -154,6 +162,7 @@ func NewServer(listen string, poolManager *pool.Manager, fpManager *fingerprint.
 	mux.HandleFunc("/api/traffic", s.authMiddleware(s.handleTraffic))
 	mux.HandleFunc("/api/system/logging", s.authMiddleware(s.handleLogging))
 	mux.HandleFunc("/api/system/health-check", s.authMiddleware(s.handleHealthCheckSettings))
+	mux.HandleFunc("/api/system/proxy", s.authMiddleware(s.handleProxySettings))
 	mux.HandleFunc("/api/config/export", s.authMiddleware(s.handleConfigExport))
 
 	// 前端静态文件（SPA fallback）
@@ -217,6 +226,10 @@ func (s *Server) SetRuntimeInfo(info RuntimeInfo) {
 
 func (s *Server) SetHealthChecker(checker *pool.HealthChecker) {
 	s.healthChecker = checker
+}
+
+func (s *Server) SetProxySettingsRuntime(runtime ProxySettingsRuntime) {
+	s.proxyRuntime = runtime
 }
 
 func (s *Server) runtimeSnapshot() RuntimeInfo {
@@ -920,6 +933,14 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 			s.healthChecker.UpdateDefaults(defaults)
 		}
 	}
+	if s.proxyRuntime != nil {
+		settings, err := s.loadProxySettings()
+		if err != nil {
+			errors = append(errors, "proxy: "+err.Error())
+		} else {
+			s.proxyRuntime.UpdateProxySettings(settings)
+		}
+	}
 
 	if len(errors) > 0 {
 		log.Printf("admin: reload partial failure: %v", errors)
@@ -953,6 +974,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		"traffic":      s.traffic.Metrics(),
 		"runtime":      s.runtimeSnapshot(),
 		"health_check": s.healthCheckSettingsSnapshot(),
+		"proxy":        s.proxySettingsSnapshot(),
 	})
 }
 
@@ -1083,6 +1105,74 @@ func (s *Server) loadHealthCheckSettings() (pool.HealthCheckDefaults, error) {
 		return pool.DefaultHealthCheckDefaults(), err
 	}
 	return pool.ParseHealthCheckDefaults(cfg.HealthCheck)
+}
+
+func (s *Server) handleProxySettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		writeJSON(w, http.StatusOK, s.proxySettingsSnapshot())
+	case "PUT":
+		var req proxyserver.ProxySettingsConfig
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request body"})
+			return
+		}
+		settings, err := proxyserver.ParseProxySettings(&req)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		if err := s.persistProxySettings(settings); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		if s.proxyRuntime != nil {
+			s.proxyRuntime.UpdateProxySettings(settings)
+		}
+		writeJSON(w, http.StatusOK, s.proxySettingsSnapshot())
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) proxySettingsSnapshot() map[string]any {
+	settings := proxyserver.DefaultProxySettings()
+	if s.proxyRuntime != nil {
+		settings = s.proxyRuntime.ProxySettings()
+	} else if loaded, err := s.loadProxySettings(); err == nil {
+		settings = loaded
+	}
+	return map[string]any{
+		"max_attempts":                     settings.MaxAttempts,
+		"template_fallback_after_attempts": settings.TemplateFallbackAfterAttempts,
+	}
+}
+
+func (s *Server) persistProxySettings(settings proxyserver.ProxySettings) error {
+	s.fileMu.Lock()
+	defer s.fileMu.Unlock()
+
+	path := filepath.Join(s.configDir, "gateway.yaml")
+	var cfg map[string]any
+	if err := loadYAML(path, &cfg); err != nil {
+		return err
+	}
+	cfg["proxy"] = map[string]any{
+		"max_attempts":                     settings.MaxAttempts,
+		"template_fallback_after_attempts": settings.TemplateFallbackAfterAttempts,
+	}
+	return atomicWriteYAML(path, cfg)
+}
+
+func (s *Server) loadProxySettings() (proxyserver.ProxySettings, error) {
+	path := filepath.Join(s.configDir, "gateway.yaml")
+	var cfg struct {
+		Proxy *proxyserver.ProxySettingsConfig `yaml:"proxy"`
+	}
+	if err := loadYAML(path, &cfg); err != nil {
+		return proxyserver.DefaultProxySettings(), err
+	}
+	return proxyserver.ParseProxySettings(cfg.Proxy)
 }
 
 func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {

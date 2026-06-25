@@ -564,6 +564,68 @@ func TestSelectEgressTemplatesUsePriorityOrder(t *testing.T) {
 	}
 }
 
+func TestSelectEgressCandidatesWithTemplateFallbackAppendsTemplatesAfterNodes(t *testing.T) {
+	manager := NewManager()
+	staticPool, err := manager.buildPool("static", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "us-a", Type: "direct", Region: "US"},
+			{Name: "us-b", Type: "direct", Region: "US"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build static pool: %v", err)
+	}
+	templatePool, err := manager.buildPool("brightdata", &PoolConfig{
+		Source:           "template",
+		Type:             "direct",
+		UsernameTemplate: "country-{region}",
+		Priority:         100,
+	})
+	if err != nil {
+		t.Fatalf("build template pool: %v", err)
+	}
+	manager.pools["static"] = staticPool
+	manager.pools["brightdata"] = templatePool
+
+	choices, err := manager.SelectEgressCandidatesWithTemplateFallback("US", "least-latency", false)
+	if err != nil {
+		t.Fatalf("select candidates: %v", err)
+	}
+	got := []string{choices[0].NodeName, choices[1].NodeName, choices[2].NodeName}
+	want := []string{"us-a", "us-b", "brightdata-us"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidate order: got %v want %v", got, want)
+		}
+	}
+	if !choices[2].Template {
+		t.Fatalf("last choice should be template: %#v", choices[2])
+	}
+}
+
+func TestMarkNodeUnavailableSetsAliveFalse(t *testing.T) {
+	manager := NewManager()
+	nodePool, err := manager.buildPool("static", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "us-a", Type: "socks5", Server: "127.0.0.1", Port: 1080, Region: "US"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	manager.pools["static"] = nodePool
+
+	if ok := manager.MarkNodeUnavailable("static", "us-a"); !ok {
+		t.Fatalf("expected node to be marked unavailable")
+	}
+	entry := manager.GetPool("static").Entries[0]
+	if entry.Alive || entry.FailCount != 1 {
+		t.Fatalf("unexpected marked entry: %#v", entry)
+	}
+}
+
 func TestChijieTemplateRejectsHTTP(t *testing.T) {
 	manager := NewManager()
 	_, err := manager.buildPool("remote", &PoolConfig{

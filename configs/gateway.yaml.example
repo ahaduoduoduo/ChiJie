@@ -29,6 +29,12 @@ health_check:
   url: "https://www.google.com/generate_204"
   max_fail: 3
 
+proxy:
+  # 单次 /proxy 出口执行失败时，最多尝试多少个可用静态/订阅节点。
+  max_attempts: 5
+  # 可用节点都失败后，是否继续尝试同地区同类型模板节点。
+  template_fallback_after_attempts: true
+
 log:
   level: "info"
   file: ""  # 空则输出到 stdout

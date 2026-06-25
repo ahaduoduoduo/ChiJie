@@ -2,7 +2,7 @@
 
 日期：2026-05-04
 
-更新：2026-05-09
+更新：2026-06-25
 
 `web/` 目录是当前 Admin 控制台原型源码。页面使用 React UMD 与 Babel standalone，以静态文件方式运行；`npm run build` 不做打包压缩，只复制 `index.html` 和 `src/` 到 `web/dist`，再由根目录 `build.sh` 复制到 `internal/admin/dist` 供 Go `embed` 打包。
 
@@ -15,6 +15,8 @@
 - `GET /api/traffic?limit=200`：请求日志、分钟级序列和聚合指标；Traffic 页面可加载更多，最高展示内存窗口中的最近 1000 条。
 - `GET /api/stats`：运行时长、节点池数量、指纹数量和流量指标。
 - `PUT /api/system/logging`：修改日志级别，并写入 `gateway.yaml`。
+- `GET / PUT /api/system/health-check`：查看或保存全局健康检查默认参数。
+- `GET / PUT /api/system/proxy`：查看或保存 `/proxy` 重试次数和模板兜底设置。
 - `GET /api/config/export`：导出当前配置目录里的 YAML 配置快照。
 - `POST /api/nodes/template/test`：按模板池、地区和可选测试 URL 即时探测连通性。普通代理模板会生成临时节点；Chijie 模板会请求远端 `/proxy`，使用 `least-latency` 和指定地区访问测试 URL。返回阶段、HTTP 状态、出口 IP、实际国家码、IP 类型、ASN/ISP 信息和错误文本。
 - `POST /api/fingerprints/test`：对 HTTPS 目标发起真实 TLS 指纹测试。
@@ -36,7 +38,7 @@
 - TLS Profiles：指纹新增、JSON/YAML 配置输入、删除、真实 HTTPS 指纹测试。
 - Overview：最近成功和最近错误请求可打开与 Traffic 一致的请求详情抽屉，详情时间按 UTC+8 展示。
 - Traffic：真实请求日志展示、详情抽屉、CSV 导出。
-- System：运行统计展示、Proxy token 生成、配置重载、日志级别保存、当前配置导出。
+- System：运行统计展示、Proxy token 生成、配置重载、日志级别保存、健康检查默认值、Proxy 重试设置、当前配置导出。
 
 ## 接口边界
 

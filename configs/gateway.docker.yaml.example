@@ -18,6 +18,10 @@ health_check:
   url: "https://www.google.com/generate_204"
   max_fail: 3
 
+proxy:
+  max_attempts: 5
+  template_fallback_after_attempts: true
+
 log:
   level: "info"
   file: ""

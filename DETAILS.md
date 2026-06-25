@@ -59,8 +59,15 @@ chijie/
 │   │   ├── page-traffic.jsx     # Traffic：请求日志、流量序列、详情抽屉、CSV 导出
 │   │   └── page-system.jsx      # System：运行统计、配置重载、日志级别保存、配置导出、Proxy token 生成
 │   ├── scripts/
-│   │   └── build.mjs            # 无依赖静态构建：复制 index.html 和 src 到 web/dist
+│   │   └── build.mjs            # 无依赖静态构建：复制 index.html、src 和站点图标到 web/dist
 │   ├── uploads/                 # 原型参考图和截图素材
+│   ├── favicon.ico              # 浏览器 favicon，内含 16/32/48 PNG 图标
+│   ├── favicon-16x16.png        # 小尺寸浏览器 PNG 图标
+│   ├── favicon-32x32.png        # 常规浏览器 PNG 图标
+│   ├── apple-touch-icon.png      # iOS / Safari 添加到主屏幕图标
+│   ├── icon-48.png              # favicon.ico 的 48px 源图
+│   ├── icon-192.png             # PWA / Android 192px PNG 图标
+│   ├── icon-512.png             # PWA / Android 512px PNG 图标
 │   ├── package.json             # npm run build 入口
 │   ├── index.html               # 静态 HTML、样式和脚本加载顺序
 │   └── dist/                    # npm run build 产物
@@ -98,7 +105,7 @@ chijie/
 
 ### server（请求入口）
 
-接收 `POST /proxy` 请求，完成认证、JSON 解包、`egress` 参数解析、出口候选排序、TLS 指纹包装、目标请求执行、出口失败重试、响应大小限制和流量记录。
+接收 `POST /proxy` 请求，完成认证、JSON 解包、`egress` 参数解析、出口候选排序、TLS 指纹包装、目标请求执行、出口失败重试、失败节点即时离线、模板延后兜底、响应大小限制和流量记录。
 
 `ProxyRequest` 当前字段：
 
@@ -132,10 +139,10 @@ WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读�
 
 - 普通请求只使用普通节点和普通模板。
 - 家宽请求只使用家宽节点和家宽模板。
-- 静态节点和订阅节点优先。
+- 静态节点和订阅节点优先，单次 `/proxy` 默认最多尝试 5 个可用节点。
 - 模板节点按 `priority` 降序尝试，同优先级按池名排序。
 - 地区无关请求只使用非 `direct` 的静态节点和订阅节点，不使用直连或模板节点。
-- 地区组无可用节点时使用同类型模板节点。
+- 显式地区请求开启 `proxy.template_fallback_after_attempts` 时，可用节点尝试失败后继续使用同类型模板节点；地区组无可用节点时也使用同类型模板节点。
 - 模板节点默认支持任意二字母地区码。
 - 多个候选出口按 `random`、`round-robin` 或 `least-latency` 选择。
 
@@ -215,6 +222,7 @@ JA3/JA4/Akamai 都按 raw 输入保存，测试结果只展示远端返回的真
 - `GET /api/traffic`：返回请求记录、时间序列和聚合指标。
 - `PUT /api/system/logging`：修改运行时日志级别，并写回 `gateway.yaml`。
 - `GET /api/system/health-check` / `PUT /api/system/health-check`：读取或保存全局健康检查默认参数，并写回 `gateway.yaml`。
+- `GET /api/system/proxy` / `PUT /api/system/proxy`：读取或保存 `/proxy` 重试次数和模板兜底设置，并写回 `gateway.yaml`。
 - `GET /api/config/export`：导出当前配置目录下的 YAML 配置快照。
 
 规则管理 API 已从后端移除。当前 `web/` 静态原型已接入 Admin API，构建产物复制到 `internal/admin/dist/` 后会随 Go 二进制嵌入。

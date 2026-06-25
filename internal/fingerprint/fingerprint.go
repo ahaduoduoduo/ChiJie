@@ -3,6 +3,7 @@ package fingerprint
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -111,6 +112,7 @@ func (m *Manager) List() []string {
 	for name := range m.fingerprints {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 

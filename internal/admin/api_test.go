@@ -12,7 +12,20 @@ import (
 
 	"chijie/internal/fingerprint"
 	"chijie/internal/pool"
+	proxyserver "chijie/internal/server"
 )
+
+type fakeProxyRuntime struct {
+	settings proxyserver.ProxySettings
+}
+
+func (f *fakeProxyRuntime) ProxySettings() proxyserver.ProxySettings {
+	return f.settings
+}
+
+func (f *fakeProxyRuntime) UpdateProxySettings(settings proxyserver.ProxySettings) {
+	f.settings = settings
+}
 
 func TestParseTokenDurationSupportsDays(t *testing.T) {
 	got, err := parseTokenDuration("30d", 24*time.Hour)
@@ -162,5 +175,47 @@ log:
 	}
 	if got["interval"] != "2m0s" || got["timeout"] != "9s" || got["url"] != "https://example.com/health" || got["max_fail"] != float64(7) {
 		t.Fatalf("unexpected health-check response: %#v", got)
+	}
+}
+
+func TestProxySettingsPersistsAndUpdatesRuntime(t *testing.T) {
+	dir := t.TempDir()
+	gatewayPath := filepath.Join(dir, "gateway.yaml")
+	if err := os.WriteFile(gatewayPath, []byte(`
+server:
+  listen: ":8080"
+admin:
+  jwt_secret: "1234567890123456"
+log:
+  level: "info"
+  file: ""
+`), 0600); err != nil {
+		t.Fatalf("write gateway config: %v", err)
+	}
+
+	manager := pool.NewManager()
+	runtime := &fakeProxyRuntime{settings: proxyserver.DefaultProxySettings()}
+	server := NewServer("127.0.0.1:0", manager, fingerprint.NewManager(), dir, "", "1234567890123456", "24h", nil)
+	server.SetProxySettingsRuntime(runtime)
+
+	reqBody := []byte(`{"max_attempts":8,"template_fallback_after_attempts":false}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/system/proxy", bytes.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT proxy settings status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if runtime.settings.MaxAttempts != 8 || runtime.settings.TemplateFallbackAfterAttempts {
+		t.Fatalf("runtime settings not updated: %#v", runtime.settings)
+	}
+
+	var stored struct {
+		Proxy proxyserver.ProxySettings `yaml:"proxy"`
+	}
+	if err := loadYAML(gatewayPath, &stored); err != nil {
+		t.Fatalf("load persisted gateway config: %v", err)
+	}
+	if stored.Proxy.MaxAttempts != 8 || stored.Proxy.TemplateFallbackAfterAttempts {
+		t.Fatalf("unexpected persisted proxy settings: %#v", stored.Proxy)
 	}
 }

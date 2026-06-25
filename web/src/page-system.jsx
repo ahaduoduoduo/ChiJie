@@ -6,17 +6,24 @@ function PageSystem({ state, dispatch }) {
   const [tokenOpen, setTokenOpen] = React.useState(false);
   const [savingLog, setSavingLog] = React.useState(false);
   const [savingHealth, setSavingHealth] = React.useState(false);
+  const [savingProxy, setSavingProxy] = React.useState(false);
   const [healthDirty, setHealthDirty] = React.useState(false);
+  const [proxyDirty, setProxyDirty] = React.useState(false);
   const [healthForm, setHealthForm] = React.useState({
     interval: "30s",
     timeout: "5s",
     url: "https://www.google.com/generate_204",
     max_fail: 3,
   });
+  const [proxyForm, setProxyForm] = React.useState({
+    max_attempts: 5,
+    template_fallback_after_attempts: true,
+  });
   const stats = state.stats || {};
   const traffic = stats.traffic || {};
   const runtime = stats.runtime || {};
   const health = stats.health_check || {};
+  const proxy = stats.proxy || {};
   const tokenHours = state.auth?.seconds ? Math.max(1, Math.round(state.auth.seconds / 3600)) : 0;
   const toast = useToast();
 
@@ -34,9 +41,22 @@ function PageSystem({ state, dispatch }) {
     });
   }, [health.interval, health.timeout, health.url, health.max_fail, healthDirty]);
 
+  React.useEffect(() => {
+    if (proxyDirty) return;
+    setProxyForm({
+      max_attempts: proxy.max_attempts || 5,
+      template_fallback_after_attempts: proxy.template_fallback_after_attempts !== false,
+    });
+  }, [proxy.max_attempts, proxy.template_fallback_after_attempts, proxyDirty]);
+
   const setHealthField = (key, value) => {
     setHealthDirty(true);
     setHealthForm(v => ({ ...v, [key]: value }));
+  };
+
+  const setProxyField = (key, value) => {
+    setProxyDirty(true);
+    setProxyForm(v => ({ ...v, [key]: value }));
   };
 
   const saveLogLevel = async (level) => {
@@ -86,6 +106,19 @@ function PageSystem({ state, dispatch }) {
     }
   };
 
+  const saveProxySettings = async () => {
+    setSavingProxy(true);
+    try {
+      const result = await dispatch({ type: "updateProxySettings", config: {
+        max_attempts: Number(proxyForm.max_attempts || 0),
+        template_fallback_after_attempts: !!proxyForm.template_fallback_after_attempts,
+      }});
+      if (result) setProxyDirty(false);
+    } finally {
+      setSavingProxy(false);
+    }
+  };
+
   return (
     <div className="page">
       <div className="page-h">
@@ -120,6 +153,29 @@ function PageSystem({ state, dispatch }) {
 	              <div className="k">JWT</div><div className="v mono">{tokenHours ? `${tokenHours}h remaining` : "active"}</div>
 	              <div className="k">Pools</div><div className="v mono">{stats.pools_count ?? state.pools.length}</div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{marginBottom:24}}>
+        <div className="card-h bordered"><h3>Proxy retry</h3><span className="sub">per-request failover</span></div>
+        <div className="card-body">
+          <div className="field-row">
+            <div className="field"><label className="field-label">Max node attempts</label>
+              <input className="input mono" type="number" min="1" max="50" value={proxyForm.max_attempts}
+                onChange={e => setProxyField("max_attempts", e.target.value)} placeholder="5"/></div>
+            <div className="field">
+              <label className="field-label">Template after node failures</label>
+              <div className="row gap-12" style={{height:36, alignItems:"center"}}>
+                <Toggle on={proxyForm.template_fallback_after_attempts} onChange={() => setProxyField("template_fallback_after_attempts", !proxyForm.template_fallback_after_attempts)}/>
+                <span className="field-hint">Use templates after configured node attempts fail.</span>
+              </div>
+            </div>
+          </div>
+          <div className="field-hint" style={{marginTop:10}}>Failed static or subscription nodes are marked offline immediately; health checks can bring them back online.</div>
+          <div className="row gap-12" style={{marginTop:16}}>
+            <button className="btn primary" disabled={savingProxy} onClick={saveProxySettings}><Ic.check/> Save proxy retry</button>
+            {savingProxy && <span className="field-hint">Saving…</span>}
           </div>
         </div>
       </div>

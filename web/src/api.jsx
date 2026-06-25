@@ -329,6 +329,10 @@
       method: "PUT",
       body: config,
     }),
+    updateProxySettings: (config) => request("/api/system/proxy", {
+      method: "PUT",
+      body: config,
+    }),
     exportConfig: () => request("/api/config/export"),
     setNodeEnabled: ({ pool, node, enabled }) => request("/api/nodes/enabled", {
       method: "POST",

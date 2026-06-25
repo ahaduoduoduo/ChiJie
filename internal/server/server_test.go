@@ -242,6 +242,101 @@ func TestDoProxyWithRetryUsesNextCandidateOnTransportError(t *testing.T) {
 	}
 }
 
+func TestProxyAttemptRoutesUseConfiguredNodeAttemptsBeforeTemplate(t *testing.T) {
+	choices := []*pool.EgressChoice{
+		{PoolName: "pool", NodeName: "node-1", Source: "static", Region: "US", Group: "US"},
+		{PoolName: "pool", NodeName: "node-2", Source: "static", Region: "US", Group: "US"},
+		{PoolName: "pool", NodeName: "node-3", Source: "static", Region: "US", Group: "US"},
+		{PoolName: "pool", NodeName: "node-4", Source: "static", Region: "US", Group: "US"},
+		{PoolName: "pool", NodeName: "node-5", Source: "static", Region: "US", Group: "US"},
+		{PoolName: "pool", NodeName: "node-6", Source: "static", Region: "US", Group: "US"},
+		{PoolName: "tpl", NodeName: "tpl-us", Source: "template", Template: true, Region: "US", Group: "US"},
+	}
+	route := &egressRoute{Region: "US", Group: "US", Choices: choices}
+
+	routes := proxyAttemptRoutes(route, ProxySettings{MaxAttempts: 5, TemplateFallbackAfterAttempts: true})
+	var got []string
+	for _, item := range routes {
+		got = append(got, item.Choice.NodeName)
+	}
+	want := []string{"node-1", "node-2", "node-3", "node-4", "node-5", "tpl-us"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("attempt route order: got %v want %v", got, want)
+	}
+}
+
+func TestDoProxyWithRetryMarksFailedNodeUnavailable(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer target.Close()
+
+	dir := t.TempDir()
+	nodesPath := filepath.Join(dir, "nodes.yaml")
+	data := []byte(`
+node_pools:
+  primary:
+    source: static
+    nodes:
+      - name: us-fail
+        type: socks5
+        server: 127.0.0.1
+        port: 1080
+        region: US
+      - name: us-ok
+        type: socks5
+        server: 127.0.0.1
+        port: 1081
+        region: US
+`)
+	if err := os.WriteFile(nodesPath, data, 0644); err != nil {
+		t.Fatalf("write nodes: %v", err)
+	}
+	manager := pool.NewManager()
+	if err := manager.LoadFromFile(nodesPath); err != nil {
+		t.Fatalf("load nodes: %v", err)
+	}
+
+	first := &testDialer{
+		name: "first",
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return nil, errors.New("simulated timeout")
+		},
+	}
+	second := &testDialer{
+		name: "second",
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+	}
+	route := &egressRoute{
+		Region: "US",
+		Group:  "US",
+		Choices: []*pool.EgressChoice{
+			{Dialer: first, PoolName: "primary", NodeName: "us-fail", Source: "static", Region: "US", Group: "US"},
+			{Dialer: second, PoolName: "primary", NodeName: "us-ok", Source: "static", Region: "US", Group: "US"},
+		},
+	}
+
+	_, _, _, finalRoute, err := (&Server{poolManager: manager, proxySettings: DefaultProxySettings()}).doProxyWithRetry(context.Background(), &ProxyRequest{
+		URL:    target.URL,
+		Method: http.MethodGet,
+	}, route)
+	if err != nil {
+		t.Fatalf("proxy with retry: %v", err)
+	}
+	if finalRoute == nil || finalRoute.Choice.NodeName != "us-ok" {
+		t.Fatalf("expected second node to succeed, got %#v", finalRoute)
+	}
+	entries := manager.GetPool("primary").Entries
+	if entries[0].Alive || entries[0].FailCount == 0 {
+		t.Fatalf("failed node should be marked unavailable: %#v", entries[0])
+	}
+	if !entries[1].Alive {
+		t.Fatalf("successful node should remain alive")
+	}
+}
+
 func TestDoProxyWithRetryDoesNotRetryResponseStatus(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)

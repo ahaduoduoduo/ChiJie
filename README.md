@@ -89,6 +89,12 @@ health_check:
   timeout: "5s"
   url: "https://www.google.com/generate_204"
   max_fail: 3
+
+proxy:
+  # 单次 /proxy 出口执行失败时最多尝试的可用静态/订阅节点数量。
+  max_attempts: 5
+  # 可用节点全部失败后继续尝试同地区同类型模板节点。
+  template_fallback_after_attempts: true
 ```
 
 `/proxy` 单次请求 body 上限 10 MB，上游响应 body 上限 32 MB；Admin API JSON body 上限 1 MB。
@@ -170,7 +176,7 @@ Content-Type: application/json
 
 响应使用目标服务器的 status code、`Content-Type` 和响应体。
 
-如果选中的非直连出口在建立连接或等待响应头阶段失败（例如 `EOF`、拨号失败、代理断流、TLS 握手失败），`/proxy` 会按当前策略再换一个候选出口重试一次。目标站点已经返回 HTTP 状态码时不会重试，例如真实的 `403`、`404`、`502` 会原样返回给调用方。
+如果选中的非直连出口在建立连接或等待响应头阶段失败（例如 `EOF`、拨号失败、代理断流、TLS 握手失败），`/proxy` 会按当前策略继续换候选出口，默认最多尝试 5 个可用静态/订阅节点。失败的静态/订阅节点会立即标记为 `Alive=false`，后续可由健康检查恢复。目标站点已经返回 HTTP 状态码时不会重试，例如真实的 `403`、`404`、`502` 会原样返回给调用方。
 
 ### 出口选择
 
@@ -181,7 +187,7 @@ Content-Type: application/json
 5. `residential=true` 查找家宽地区组，例如 `US-RES`。
 6. 地区组内存在可用静态节点或订阅节点时，按 `strategy` 选择节点。
 7. 订阅池开启 `try_offline` 且某地区只有一个离线订阅节点时，在模板 fallback 前允许该节点再尝试一次。
-8. 地区组内没有可用节点时，使用同类型模板节点生成出口；模板按 `priority` 从高到低尝试。
+8. 开启 `proxy.template_fallback_after_attempts` 时，地区组内可用节点连续失败达到 `proxy.max_attempts` 后继续尝试同类型模板节点；地区组内没有可用节点时也会直接使用同类型模板节点。
 9. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板。
 10. 没有可用节点也没有可用模板时返回错误。
 
@@ -286,6 +292,7 @@ Proxy API 调用 token 由后台生成，使用同一个 `jwt_secret` 签名，�
 | GET | /api/stats | 基础统计、节点池数量、指纹数量和流量指标 |
 | PUT | /api/system/logging | 修改当前日志级别并写入 `gateway.yaml` |
 | GET / PUT | /api/system/health-check | 查看或修改全局健康检查默认参数，并写入 `gateway.yaml` |
+| GET / PUT | /api/system/proxy | 查看或修改 `/proxy` 重试与模板兜底设置，并写入 `gateway.yaml` |
 | GET | /api/config/export | 导出当前 YAML 配置快照 |
 
 ## 开发计划

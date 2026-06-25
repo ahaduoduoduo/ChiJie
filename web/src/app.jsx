@@ -413,6 +413,12 @@ function App() {
           toast("Health check saved");
           return result;
         }
+        case "updateProxySettings": {
+          const result = await api.updateProxySettings(action.config);
+          await refreshData(true);
+          toast("Proxy retry saved");
+          return result;
+        }
         default:
           return null;
       }

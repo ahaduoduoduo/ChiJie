@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"chijie/internal/dialer"
@@ -28,8 +29,8 @@ const MaxProxyBodyBytes = 10 * 1024 * 1024
 // MaxProxyResponseBytes 是 /proxy 单次上游响应允许读取的最大 body 大小。
 const MaxProxyResponseBytes = 32 * 1024 * 1024
 
-// MaxProxyAttempts 是一次 /proxy 请求在出口执行失败时允许尝试的最大出口数量。
-const MaxProxyAttempts = 2
+// DefaultProxyMaxAttempts 是一次 /proxy 请求在普通出口执行失败时默认允许尝试的可用节点数量。
+const DefaultProxyMaxAttempts = 5
 
 // MaxChijieProxyHops 限制 Chijie 之间互相转发时的最大跳数，防止 A/B 循环。
 const MaxChijieProxyHops = 3
@@ -60,6 +61,60 @@ type Server struct {
 	httpServer          *http.Server
 	allowPrivateTargets bool
 	remoteChijieClient  *http.Client
+	proxySettingsMu     sync.RWMutex
+	proxySettings       ProxySettings
+}
+
+// ProxySettingsConfig 是 gateway.yaml / Admin API 使用的 /proxy 重试配置。
+// TemplateFallbackAfterAttempts 使用指针以区分“未配置”和“显式 false”。
+type ProxySettingsConfig struct {
+	MaxAttempts                   int   `yaml:"max_attempts" json:"max_attempts"`
+	TemplateFallbackAfterAttempts *bool `yaml:"template_fallback_after_attempts" json:"template_fallback_after_attempts"`
+}
+
+// ProxySettings 是运行时归一化后的 /proxy 重试配置。
+type ProxySettings struct {
+	MaxAttempts                   int  `json:"max_attempts" yaml:"max_attempts"`
+	TemplateFallbackAfterAttempts bool `json:"template_fallback_after_attempts" yaml:"template_fallback_after_attempts"`
+}
+
+func DefaultProxySettings() ProxySettings {
+	return ProxySettings{
+		MaxAttempts:                   DefaultProxyMaxAttempts,
+		TemplateFallbackAfterAttempts: true,
+	}
+}
+
+func ParseProxySettings(cfg *ProxySettingsConfig) (ProxySettings, error) {
+	settings := DefaultProxySettings()
+	if cfg == nil {
+		return settings, nil
+	}
+	if cfg.MaxAttempts > 0 {
+		settings.MaxAttempts = cfg.MaxAttempts
+	}
+	if cfg.TemplateFallbackAfterAttempts != nil {
+		settings.TemplateFallbackAfterAttempts = *cfg.TemplateFallbackAfterAttempts
+	}
+	return ValidateProxySettings(settings)
+}
+
+func ValidateProxySettings(settings ProxySettings) (ProxySettings, error) {
+	if settings.MaxAttempts <= 0 {
+		settings.MaxAttempts = DefaultProxyMaxAttempts
+	}
+	if settings.MaxAttempts > 50 {
+		return settings, fmt.Errorf("proxy.max_attempts must be between 1 and 50")
+	}
+	return settings, nil
+}
+
+func ProxySettingsConfigFromSettings(settings ProxySettings) *ProxySettingsConfig {
+	value := settings.TemplateFallbackAfterAttempts
+	return &ProxySettingsConfig{
+		MaxAttempts:                   settings.MaxAttempts,
+		TemplateFallbackAfterAttempts: &value,
+	}
 }
 
 // ProxyRequest 客户端发来的代理请求
@@ -102,6 +157,7 @@ type Config struct {
 	TLSCert             string
 	TLSKey              string
 	AllowPrivateTargets bool
+	ProxySettings       *ProxySettings
 }
 
 var errInvalidRegion = errors.New("region must be an empty string or a two-letter region code")
@@ -122,6 +178,13 @@ func NewServer(cfg *Config, poolManager *pool.Manager, fpManager *fingerprint.Ma
 		fpManager:           fpManager,
 		traffic:             trafficStore,
 		allowPrivateTargets: cfg.AllowPrivateTargets,
+		proxySettings:       DefaultProxySettings(),
+	}
+	if cfg.ProxySettings != nil {
+		settings, err := ValidateProxySettings(*cfg.ProxySettings)
+		if err == nil {
+			s.proxySettings = settings
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -138,6 +201,36 @@ func NewServer(cfg *Config, poolManager *pool.Manager, fpManager *fingerprint.Ma
 	}
 
 	return s
+}
+
+func (s *Server) ProxySettings() ProxySettings {
+	if s == nil {
+		return DefaultProxySettings()
+	}
+	s.proxySettingsMu.RLock()
+	defer s.proxySettingsMu.RUnlock()
+	settings := s.proxySettings
+	if settings.MaxAttempts <= 0 {
+		settings = DefaultProxySettings()
+	}
+	settings, err := ValidateProxySettings(settings)
+	if err != nil {
+		return DefaultProxySettings()
+	}
+	return settings
+}
+
+func (s *Server) UpdateProxySettings(settings ProxySettings) {
+	if s == nil {
+		return
+	}
+	settings, err := ValidateProxySettings(settings)
+	if err != nil {
+		return
+	}
+	s.proxySettingsMu.Lock()
+	s.proxySettings = settings
+	s.proxySettingsMu.Unlock()
 }
 
 // Start 启动服务器
@@ -328,7 +421,7 @@ func chijieHopFromRequest(r *http.Request) int {
 }
 
 func (s *Server) doProxyWithRetry(ctx context.Context, req *ProxyRequest, route *egressRoute) ([]byte, string, int, *egressRoute, error) {
-	attempts := proxyAttemptRoutes(route, proxyAttemptLimit(route))
+	attempts := proxyAttemptRoutes(route, s.ProxySettings())
 	var attemptErrors []string
 	var lastRoute *egressRoute
 	var lastErr error
@@ -341,6 +434,9 @@ func (s *Server) doProxyWithRetry(ctx context.Context, req *ProxyRequest, route 
 		}
 		lastErr = err
 		attemptErrors = append(attemptErrors, fmt.Sprintf("%s: %v", routeAttemptName(attemptRoute), err))
+		if isRetryableProxyAttempt(ctx, err) {
+			s.markAttemptNodeUnavailable(attemptRoute)
+		}
 		if idx+1 >= len(attempts) || !isRetryableProxyAttempt(ctx, err) {
 			break
 		}
@@ -356,34 +452,41 @@ func (s *Server) doProxyWithRetry(ctx context.Context, req *ProxyRequest, route 
 	return nil, "", 0, lastRoute, fmt.Errorf("proxy request failed")
 }
 
-func proxyAttemptLimit(route *egressRoute) int {
-	if route == nil || len(route.Choices) == 0 {
-		return MaxProxyAttempts
-	}
-	for _, choice := range route.Choices {
-		if choice != nil && choice.Template {
-			return len(route.Choices)
-		}
-	}
-	return MaxProxyAttempts
-}
-
-func proxyAttemptRoutes(route *egressRoute, maxAttempts int) []*egressRoute {
+func proxyAttemptRoutes(route *egressRoute, settings ProxySettings) []*egressRoute {
 	if route == nil {
 		return nil
-	}
-	if maxAttempts <= 0 {
-		maxAttempts = 1
 	}
 	if len(route.Choices) == 0 {
 		return []*egressRoute{route}
 	}
-	limit := len(route.Choices)
-	if limit > maxAttempts {
-		limit = maxAttempts
+	settings, err := ValidateProxySettings(settings)
+	if err != nil {
+		settings = DefaultProxySettings()
 	}
-	routes := make([]*egressRoute, 0, limit)
-	for _, choice := range route.Choices[:limit] {
+	hasNodeChoice := false
+	for _, choice := range route.Choices {
+		if choice != nil && !choice.Template {
+			hasNodeChoice = true
+			break
+		}
+	}
+
+	routes := make([]*egressRoute, 0, len(route.Choices))
+	nodeAttempts := 0
+	for _, choice := range route.Choices {
+		if choice == nil {
+			continue
+		}
+		if choice.Template {
+			if hasNodeChoice && !settings.TemplateFallbackAfterAttempts {
+				continue
+			}
+		} else {
+			if nodeAttempts >= settings.MaxAttempts {
+				continue
+			}
+			nodeAttempts++
+		}
 		attemptRoute := *route
 		attemptRoute.Choice = choice
 		attemptRoute.Region = choice.Region
@@ -392,6 +495,15 @@ func proxyAttemptRoutes(route *egressRoute, maxAttempts int) []*egressRoute {
 		routes = append(routes, &attemptRoute)
 	}
 	return routes
+}
+
+func (s *Server) markAttemptNodeUnavailable(route *egressRoute) {
+	if s == nil || s.poolManager == nil || route == nil || route.Choice == nil || route.Choice.Template {
+		return
+	}
+	if ok := s.poolManager.MarkNodeUnavailable(route.Choice.PoolName, route.Choice.NodeName); ok {
+		util.Warnf("[egress] marked %s unavailable after proxy attempt failure", routeAttemptName(route))
+	}
 }
 
 func routeAttemptName(route *egressRoute) string {
@@ -706,7 +818,14 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 		return nil, errInvalidRegion
 	}
 
-	choices, err := s.poolManager.SelectEgressCandidates(region, strategy, options.Residential)
+	settings := s.ProxySettings()
+	var choices []*pool.EgressChoice
+	var err error
+	if settings.TemplateFallbackAfterAttempts {
+		choices, err = s.poolManager.SelectEgressCandidatesWithTemplateFallback(region, strategy, options.Residential)
+	} else {
+		choices, err = s.poolManager.SelectEgressCandidates(region, strategy, options.Residential)
+	}
 	if err != nil {
 		return nil, err
 	}

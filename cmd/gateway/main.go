@@ -43,7 +43,8 @@ type GatewayConfig struct {
 		LoginWindow      string `yaml:"login_window"`
 		LoginLockout     string `yaml:"login_lockout"`
 	} `yaml:"admin"`
-	HealthCheck pool.HealthCheckConfig `yaml:"health_check"`
+	HealthCheck pool.HealthCheckConfig      `yaml:"health_check"`
+	Proxy       *server.ProxySettingsConfig `yaml:"proxy"`
 	Log         struct {
 		Level string `yaml:"level"`
 		File  string `yaml:"file"`
@@ -72,6 +73,10 @@ func main() {
 	}
 	if err := validateGatewayConfig(gatewayConfig); err != nil {
 		log.Fatalf("invalid gateway config: %v", err)
+	}
+	proxySettings, err := server.ParseProxySettings(gatewayConfig.Proxy)
+	if err != nil {
+		log.Fatalf("invalid proxy config: %v", err)
 	}
 
 	// 设置日志
@@ -120,6 +125,16 @@ func main() {
 
 	trafficStore := traffic.NewStore(1000)
 
+	// 创建代理服务器，Admin 设置页会复用同一个运行时配置入口。
+	srv := server.NewServer(&server.Config{
+		Listen:              gatewayConfig.Server.Listen,
+		JWTSecret:           gatewayConfig.Admin.JWTSecret,
+		TLSCert:             gatewayConfig.Server.TLS.Cert,
+		TLSKey:              gatewayConfig.Server.TLS.Key,
+		AllowPrivateTargets: gatewayConfig.Server.AllowPrivateTargets,
+		ProxySettings:       &proxySettings,
+	}, poolMgr, fpManager, trafficStore)
+
 	// 解析登录限速配置
 	loginLimit := buildLoginLimit(gatewayConfig)
 
@@ -136,6 +151,7 @@ func main() {
 			trafficStore,
 		)
 		adminSrv.SetHealthChecker(healthChecker)
+		adminSrv.SetProxySettingsRuntime(srv)
 		adminSrv.SetRuntimeInfo(admin.RuntimeInfo{
 			ProxyListen: gatewayConfig.Server.Listen,
 			ProxyTLS:    gatewayConfig.Server.TLS.Cert != "" && gatewayConfig.Server.TLS.Key != "",
@@ -150,15 +166,6 @@ func main() {
 			}
 		}()
 	}
-
-	// 创建并启动服务器
-	srv := server.NewServer(&server.Config{
-		Listen:              gatewayConfig.Server.Listen,
-		JWTSecret:           gatewayConfig.Admin.JWTSecret,
-		TLSCert:             gatewayConfig.Server.TLS.Cert,
-		TLSKey:              gatewayConfig.Server.TLS.Key,
-		AllowPrivateTargets: gatewayConfig.Server.AllowPrivateTargets,
-	}, poolMgr, fpManager, trafficStore)
 
 	// 异步启动主服务器
 	srvErrCh := make(chan error, 1)
