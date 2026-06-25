@@ -363,3 +363,8 @@
 - [x] 显式地区请求支持可用节点失败后继续尝试同地区同类型模板节点
 - [x] `/api/nodes` 和 `/api/fingerprints` 返回固定顺序，避免自动刷新后列表跳动
 - [x] Subscriptions 节点条带的 `+N` 改为可展开按钮
+
+## P36 — Docker 远程构建修复 ✅
+日期：2026-06-25
+
+- [x] `Dockerfile` 的 `web-builder` 阶段复制 favicon 和 PNG 图标，匹配 `web/scripts/build.mjs` 的构建输入

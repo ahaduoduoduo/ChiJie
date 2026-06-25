@@ -5,6 +5,7 @@ FROM node:22-bookworm-slim AS web-builder
 WORKDIR /src/web
 COPY web/package.json ./
 COPY web/index.html ./index.html
+COPY web/favicon.ico web/favicon-16x16.png web/favicon-32x32.png web/apple-touch-icon.png web/icon-48.png web/icon-192.png web/icon-512.png ./
 COPY web/scripts ./scripts
 COPY web/src ./src
 RUN npm run build
