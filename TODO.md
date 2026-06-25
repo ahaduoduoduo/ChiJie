@@ -402,3 +402,9 @@
 - [x] 新增 `vless+xhttp` 专用拨号器，支持 `packet-up` 和 TLS `stream-up`
 - [x] Clash YAML 的 `xhttp-opts` 支持解析 `path`、`mode` 和 `download-settings`
 - [x] VLESS URI 支持读取 `mode`、`path` 和 `extra` 中的 XHTTP 参数
+
+## P42 — 内置 DNS 解析兜底 ✅
+日期：2026-06-25
+
+- [x] 出口节点拨号、订阅拉取校验和 sing-box DNSRouter 使用内置公共 DNS resolver
+- [x] 内置 DNS 服务器使用 `1.1.1.1:53` 和 `8.8.8.8:53`，避免 Docker `127.0.0.11` 解析失败影响节点

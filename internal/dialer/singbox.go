@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"chijie/internal/dnsresolver"
 	"chijie/internal/util"
 
 	"github.com/miekg/dns"
@@ -89,7 +90,7 @@ func (systemDNSRouter) Exchange(ctx context.Context, message *dns.Msg, options a
 	return nil, fmt.Errorf("dns exchange is not supported")
 }
 func (systemDNSRouter) Lookup(ctx context.Context, domain string, options adapter.DNSQueryOptions) ([]netip.Addr, error) {
-	return net.DefaultResolver.LookupNetIP(ctx, "ip", domain)
+	return dnsresolver.Resolver().LookupNetIP(ctx, "ip", domain)
 }
 func (systemDNSRouter) ClearCache() {}
 func (systemDNSRouter) LookupReverseMapping(ip netip.Addr) (string, bool) {

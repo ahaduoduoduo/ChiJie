@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"chijie/internal/dnsresolver"
 )
 
 // DirectDialer 直连
@@ -14,10 +16,7 @@ type DirectDialer struct {
 
 func NewDirectDialer() *DirectDialer {
 	return &DirectDialer{
-		dialer: &net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		},
+		dialer: dnsresolver.NewDialer(30 * time.Second),
 	}
 }
 

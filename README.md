@@ -101,6 +101,8 @@ proxy:
 
 订阅拉取只允许 `http` / `https`，默认拒绝私网/回环/保留地址，单次订阅响应 body 上限 4 MB。
 
+出口节点拨号、订阅地址校验和 sing-box DNSRouter 使用内置公共 DNS resolver，默认查询 `1.1.1.1:53` 和 `8.8.8.8:53`，避免 Docker 内置 `127.0.0.11` 解析失败影响节点可用性。
+
 Admin 登录限速的客户端 IP 在 Cloudflare 部署下优先读取 `CF-Connecting-IP` / `True-Client-IP`，随后兼容 `X-Forwarded-For` 与 `X-Real-IP`，无有效 header 时回退到 `RemoteAddr`。
 
 `/tunnel` WebSocket 默认拒绝跨站浏览器升级（无 Origin 放行；有 Origin 必须同源），不影响 Cloudflare Workers / Go / Node.js / Python 等服务端客户端。

@@ -55,7 +55,7 @@ func NewVLESSXHTTPDialer(node *Node) (*VLESSXHTTPDialer, error) {
 		}
 	}
 
-	transport, err := xhttp.NewClient(ctx, N.SystemDialer, M.ParseSocksaddrHostPort(node.Server, uint16(node.Port)), options, tlsConfig)
+	transport, err := xhttp.NewClient(ctx, newDNSNetworkDialer(30*time.Second), M.ParseSocksaddrHostPort(node.Server, uint16(node.Port)), options, tlsConfig)
 	if err != nil {
 		return nil, err
 	}

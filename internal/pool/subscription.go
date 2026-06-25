@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"chijie/internal/dialer"
+	"chijie/internal/dnsresolver"
 	"chijie/internal/netguard"
 	"chijie/internal/util"
 
@@ -33,11 +34,8 @@ const subscriptionUserAgent = "clash-verge/v2.0.0"
 
 func NewSubscriptionParser() *SubscriptionParser {
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dnsresolver.NewDialer(10 * time.Second).DialContext,
 		ForceAttemptHTTP2:     false,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,

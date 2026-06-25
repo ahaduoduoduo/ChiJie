@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"chijie/internal/dnsresolver"
+
 	"golang.org/x/net/proxy"
 )
 
@@ -27,10 +29,7 @@ func NewSOCKS5Dialer(node *Node) (*SOCKS5Dialer, error) {
 		}
 	}
 
-	dialer, err := proxy.SOCKS5("tcp", addr, auth, &net.Dialer{
-		Timeout:   30 * time.Second,
-		KeepAlive: 30 * time.Second,
-	})
+	dialer, err := proxy.SOCKS5("tcp", addr, auth, dnsresolver.NewDialer(30*time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("create socks5 dialer: %w", err)
 	}

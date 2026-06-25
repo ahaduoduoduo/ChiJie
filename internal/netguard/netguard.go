@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"chijie/internal/dnsresolver"
 )
 
 // ErrBlockedAddress 表示目标命中私网/保留段黑名单。
@@ -56,8 +58,7 @@ func CheckHost(ctx context.Context, host string) error {
 		}
 		return nil
 	}
-	resolver := net.DefaultResolver
-	addrs, err := resolver.LookupIPAddr(ctx, host)
+	addrs, err := dnsresolver.Resolver().LookupIPAddr(ctx, host)
 	if err != nil {
 		return fmt.Errorf("resolve host: %w", err)
 	}

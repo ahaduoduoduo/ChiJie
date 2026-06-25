@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"chijie/internal/dnsresolver"
 )
 
 // HTTPProxyDialer HTTP 代理
@@ -16,6 +18,7 @@ type HTTPProxyDialer struct {
 	node      *Node
 	proxyURL  *url.URL
 	basicAuth string
+	dialer    *net.Dialer
 }
 
 func NewHTTPProxyDialer(node *Node) (*HTTPProxyDialer, error) {
@@ -36,12 +39,13 @@ func NewHTTPProxyDialer(node *Node) (*HTTPProxyDialer, error) {
 		node:      node,
 		proxyURL:  proxyURL,
 		basicAuth: basicAuth,
+		dialer:    dnsresolver.NewDialer(30 * time.Second),
 	}, nil
 }
 
 func (d *HTTPProxyDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	// 连接到代理服务器
-	conn, err := (&net.Dialer{Timeout: 30 * time.Second}).DialContext(ctx, network, d.proxyURL.Host)
+	conn, err := d.dialer.DialContext(ctx, network, d.proxyURL.Host)
 	if err != nil {
 		return nil, fmt.Errorf("connect to proxy: %w", err)
 	}
@@ -83,6 +87,7 @@ func (d *HTTPProxyDialer) DialContext(ctx context.Context, network, addr string)
 func (d *HTTPProxyDialer) GetHTTPTransport() *http.Transport {
 	return &http.Transport{
 		Proxy:                 http.ProxyURL(d.proxyURL),
+		DialContext:           d.dialer.DialContext,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
