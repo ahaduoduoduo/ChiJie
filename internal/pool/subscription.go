@@ -29,7 +29,7 @@ type SubscriptionParser struct {
 }
 
 const MaxSubscriptionBodyBytes = 4 * 1024 * 1024
-const subscriptionUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+const subscriptionUserAgent = "clash-verge/v2.0.0"
 
 func NewSubscriptionParser() *SubscriptionParser {
 	transport := &http.Transport{
@@ -114,7 +114,7 @@ func (p *SubscriptionParser) fetchOne(subURL string) ([]dialer.Node, error) {
 	content := strings.TrimSpace(string(body))
 
 	// 尝试 Clash YAML 格式
-	if strings.HasPrefix(content, "proxies:") || strings.Contains(content[:min(200, len(content))], "proxies:") {
+	if looksLikeClashYAML(content) {
 		return p.parseClashYAML([]byte(content))
 	}
 
@@ -130,6 +130,13 @@ func (p *SubscriptionParser) fetchOne(subURL string) ([]dialer.Node, error) {
 	}
 
 	return p.parseURIList(decoded)
+}
+
+func looksLikeClashYAML(content string) bool {
+	content = strings.TrimSpace(content)
+	return strings.HasPrefix(content, "proxies:") ||
+		strings.Contains(content, "\nproxies:") ||
+		strings.Contains(content, "\r\nproxies:")
 }
 
 func subscriptionFetchError(raw string, err error) error {

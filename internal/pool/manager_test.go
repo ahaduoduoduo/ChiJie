@@ -845,6 +845,31 @@ func TestRejectRegexFiltersSubscriptionNodes(t *testing.T) {
 	}
 }
 
+func TestBuildSubscriptionEntriesReportsUnsupportedTransports(t *testing.T) {
+	nodes := []dialer.Node{
+		{
+			Name:   "vless-xhttp",
+			Type:   "vless",
+			Server: "vless.example.com",
+			Port:   443,
+			Extra: map[string]string{
+				"uuid":     "11111111-1111-1111-1111-111111111111",
+				"security": "tls",
+				"network":  "xhttp",
+				"sni":      "vless.example.com",
+			},
+		},
+	}
+
+	entries, warning := buildSubscriptionEntries(nodes, &PoolConfig{Source: "subscription"})
+	if len(entries) != 0 {
+		t.Fatalf("expected unsupported node to be skipped, got %d entries", len(entries))
+	}
+	if !strings.Contains(warning, "loaded 0 supported nodes") || !strings.Contains(warning, `unsupported v2ray transport "xhttp"`) {
+		t.Fatalf("unexpected warning: %q", warning)
+	}
+}
+
 func TestRegionDetectionAvoidsPlainWordFalsePositives(t *testing.T) {
 	cases := []struct {
 		name string

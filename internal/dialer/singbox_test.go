@@ -1,6 +1,17 @@
 package dialer
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+func TestNormalizeHysteriaServerPorts(t *testing.T) {
+	got := normalizeHysteriaServerPorts("16001-17000, 18001:19000|443")
+	want := []string{"16001:17000", "18001:19000", "443:443"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
 
 func TestNewSingBoxDialerSupportsCommonProtocols(t *testing.T) {
 	nodes := []*Node{
@@ -68,6 +79,7 @@ func TestNewSingBoxDialerSupportsCommonProtocols(t *testing.T) {
 				"obfs_password": "obfs-pass",
 				"up_mbps":       "20",
 				"down_mbps":     "100",
+				"ports":         "16001-17000",
 			},
 		},
 		{

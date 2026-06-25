@@ -236,7 +236,7 @@ func buildHysteria2Options(node *Node) map[string]any {
 		options["down_mbps"] = downMbps
 	}
 	if ports := util.FirstNonEmpty(node.Extra["server_ports"], node.Extra["ports"]); ports != "" {
-		options["server_ports"] = util.SplitList(ports)
+		options["server_ports"] = normalizeHysteriaServerPorts(ports)
 	}
 	if hopInterval := util.FirstNonEmpty(node.Extra["hop_interval"], node.Extra["hop-interval"]); hopInterval != "" {
 		options["hop_interval"] = hopInterval
@@ -249,6 +249,27 @@ func buildHysteria2Options(node *Node) map[string]any {
 	}
 	options["tls"] = buildTLSOptions(node, true)
 	return options
+}
+
+func normalizeHysteriaServerPorts(raw string) []string {
+	items := util.SplitList(raw)
+	ports := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if strings.Contains(item, ":") {
+			ports = append(ports, item)
+			continue
+		}
+		if strings.Contains(item, "-") {
+			ports = append(ports, strings.Replace(item, "-", ":", 1))
+			continue
+		}
+		ports = append(ports, item+":"+item)
+	}
+	return ports
 }
 
 func buildAnyTLSOptions(node *Node) map[string]any {

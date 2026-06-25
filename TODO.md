@@ -368,3 +368,22 @@
 日期：2026-06-25
 
 - [x] `Dockerfile` 的 `web-builder` 阶段复制 favicon 和 PNG 图标，匹配 `web/scripts/build.mjs` 的构建输入
+
+## P37 — Shadowrocket Hysteria2 订阅兼容 ✅
+日期：2026-06-25
+
+- [x] `hysteria2` 订阅节点支持 `mport=16001-17000` 端口范围写法，并转换为 sing-box 接受的 `16001:17000`
+- [x] 补充 Hysteria2 端口跳跃范围的 dialer 单元测试
+
+## P38 — 订阅解析失败原因可见性 ✅
+日期：2026-06-25
+
+- [x] Clash YAML 识别支持 `mixed-port`、`dns` 等头部配置后再出现 `proxies:` 的订阅内容
+- [x] 订阅解析成功但节点因不支持的传输协议被跳过时，在订阅池状态中展示跳过原因
+- [x] 标记 `xhttp` / `splithttp` 为当前不支持的 V2Ray transport，避免订阅页只显示 0 且没有原因
+
+## P39 — 订阅拉取 User-Agent 调整 ✅
+日期：2026-06-25
+
+- [x] 订阅拉取 UA 从 Chrome 类 UA 改为 `clash-verge/v2.0.0`，避免部分订阅源只返回精简节点集合
+- [x] 对比 `clash-verge/v2.0.0`、Shadowrocket 和 Chrome UA 在同一订阅链接下的节点数量差异

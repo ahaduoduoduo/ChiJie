@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -31,7 +32,7 @@ func generateTestBearerToken(t *testing.T, secret string) string {
 	return tokenString
 }
 
-func setupTestServer(t *testing.T) (*server.Config, string) {
+func setupTestServer(t *testing.T, allowPrivateTargets ...bool) (*server.Config, string) {
 	t.Helper()
 
 	// 加载节点池
@@ -46,8 +47,9 @@ func setupTestServer(t *testing.T) (*server.Config, string) {
 	}
 
 	cfg := &server.Config{
-		Listen:    freeTestListenAddr(t),
-		JWTSecret: "jwt-secret",
+		Listen:              freeTestListenAddr(t),
+		JWTSecret:           "jwt-secret",
+		AllowPrivateTargets: len(allowPrivateTargets) > 0 && allowPrivateTargets[0],
 	}
 
 	srv := server.NewServer(cfg, poolMgr, fingerprint.NewManager())
@@ -129,12 +131,18 @@ func TestAuthRequired(t *testing.T) {
 }
 
 func TestProxyDirect(t *testing.T) {
-	cfg, baseURL := setupTestServer(t)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"user_agent":"`+r.UserAgent()+`"}`)
+	}))
+	defer target.Close()
+
+	cfg, baseURL := setupTestServer(t, true)
 
 	token := generateTestBearerToken(t, cfg.JWTSecret)
 
-	// 通过直连代理请求 httpbin
-	body := `{"url":"https://httpbin.org/get","method":"GET","headers":{"User-Agent":"Chijie-Test"},"egress":{}}`
+	// 通过直连代理请求本地目标，避免测试依赖外部服务可用性。
+	body := `{"url":"` + target.URL + `","method":"GET","headers":{"User-Agent":"Chijie-Test"},"egress":{}}`
 	req, _ := http.NewRequest("POST", baseURL+"/proxy", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)

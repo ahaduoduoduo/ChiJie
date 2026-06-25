@@ -240,15 +240,9 @@ func (m *Manager) buildPool(name string, cfg *PoolConfig) (*Pool, error) {
 			return pool, nil
 		}
 
-		for i := range nodes {
-			node := nodes[i]
-			d, err := dialer.NewDialer(&node)
-			if err != nil {
-				log.Printf("skip node %s: %v", node.Name, err)
-				continue
-			}
-			pool.Entries = append(pool.Entries, newNodeEntry(&node, d, cfg))
-		}
+		entries, warning := buildSubscriptionEntries(nodes, cfg)
+		pool.Entries = entries
+		pool.Error = warning
 		log.Printf("pool %s: loaded %d nodes from subscription", name, len(pool.Entries))
 
 	default:
@@ -822,24 +816,74 @@ func (m *Manager) RefreshSubscription(poolName string) error {
 		return err
 	}
 
-	entries := make([]*NodeEntry, 0, len(nodes))
-	for i := range nodes {
-		node := nodes[i]
-		d, err := dialer.NewDialer(&node)
-		if err != nil {
-			log.Printf("skip node %s: %v", node.Name, err)
-			continue
-		}
-		entries = append(entries, newNodeEntry(&node, d, pool.Config))
-	}
+	entries, warning := buildSubscriptionEntries(nodes, pool.Config)
 
 	pool.mu.Lock()
 	pool.Entries = entries
-	pool.Error = ""
+	pool.Error = warning
 	pool.mu.Unlock()
 
 	log.Printf("pool %s: refreshed %d nodes", poolName, len(entries))
 	return nil
+}
+
+func buildSubscriptionEntries(nodes []dialer.Node, cfg *PoolConfig) ([]*NodeEntry, string) {
+	entries := make([]*NodeEntry, 0, len(nodes))
+	skipped := make(map[string]int)
+	skippedTotal := 0
+
+	for i := range nodes {
+		node := nodes[i]
+		d, err := dialer.NewDialer(&node)
+		if err != nil {
+			reason := subscriptionSkipReason(&node, err)
+			skipped[reason]++
+			skippedTotal++
+			log.Printf("skip node %s: %v", node.Name, err)
+			continue
+		}
+		entries = append(entries, newNodeEntry(&node, d, cfg))
+	}
+
+	if skippedTotal == 0 {
+		return entries, ""
+	}
+	if len(entries) == 0 && len(nodes) > 0 {
+		return entries, fmt.Sprintf("subscription parsed %d nodes but loaded 0 supported nodes: %s", len(nodes), formatSkipReasons(skipped))
+	}
+	return entries, fmt.Sprintf("subscription skipped %d nodes: %s", skippedTotal, formatSkipReasons(skipped))
+}
+
+func subscriptionSkipReason(node *dialer.Node, err error) string {
+	if node != nil {
+		network := strings.ToLower(util.FirstNonEmpty(node.Extra["network"], node.Extra["transport"], node.Extra["transport_type"]))
+		switch network {
+		case "xhttp", "splithttp", "split-http":
+			return fmt.Sprintf("unsupported v2ray transport %q", network)
+		}
+	}
+	return err.Error()
+}
+
+func formatSkipReasons(reasons map[string]int) string {
+	if len(reasons) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(reasons))
+	for reason := range reasons {
+		keys = append(keys, reason)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, reason := range keys {
+		if reasons[reason] > 1 {
+			parts = append(parts, fmt.Sprintf("%s (%d)", reason, reasons[reason]))
+			continue
+		}
+		parts = append(parts, reason)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // StartSubscriptionUpdater 启动后台订阅自动更新。

@@ -174,6 +174,34 @@ func TestFetchSupportsBase64SSURIListWithSIP002Path(t *testing.T) {
 	}
 }
 
+func TestFetchDetectsClashYAMLWithGeneralConfigHeader(t *testing.T) {
+	yamlContent := strings.Repeat("# header\n", 40) + `
+mixed-port: 7890
+mode: rule
+proxies:
+  - name: ss-node
+    type: ss
+    server: ss.example.com
+    port: 8388
+    cipher: aes-128-gcm
+    password: pass
+`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(yamlContent))
+	}))
+	defer server.Close()
+
+	parser := NewSubscriptionParser()
+	parser.client = subscriptionTestClient(t, server)
+	nodes, err := parser.Fetch("http://example.com/sub")
+	if err != nil {
+		t.Fatalf("fetch subscription: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Name != "ss-node" {
+		t.Fatalf("unexpected nodes: %#v", nodes)
+	}
+}
+
 func TestFetchSupportsBase64AnyTLSAndTUICURIList(t *testing.T) {
 	content := strings.Join([]string{
 		"anytls://any-pass@any.example.com:443?security=tls&sni=any.example.com&fp=chrome#AnyTLS",
