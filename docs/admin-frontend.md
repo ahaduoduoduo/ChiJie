@@ -16,7 +16,7 @@
 - `GET /api/stats`：运行时长、节点池数量、指纹数量和流量指标。
 - `PUT /api/system/logging`：修改日志级别，并写入 `gateway.yaml`。
 - `GET / PUT /api/system/health-check`：查看或保存全局健康检查默认参数。
-- `GET / PUT /api/system/proxy`：查看或保存 `/proxy` 重试次数和模板兜底设置。
+- `GET / PUT /api/system/proxy`：查看或保存 `/proxy` 响应头等待超时、完整请求总超时、重试次数和模板兜底设置。
 - `GET /api/config/export`：导出当前配置目录里的 YAML 配置快照。
 - `POST /api/nodes/template/test`：按模板池、地区和可选测试 URL 即时探测连通性。普通代理模板会生成临时节点；Chijie 模板会请求远端 `/proxy`，使用 `least-latency` 和指定地区访问测试 URL。返回阶段、HTTP 状态、出口 IP、实际国家码、IP 类型、ASN/ISP 信息和错误文本。
 - `POST /api/fingerprints/test`：对 HTTPS 目标发起真实 TLS 指纹测试。

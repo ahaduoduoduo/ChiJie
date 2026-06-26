@@ -18,6 +18,8 @@ function PageSystem({ state, dispatch }) {
   const [proxyForm, setProxyForm] = React.useState({
     max_attempts: 5,
     template_fallback_after_attempts: true,
+    response_header_timeout: "3s",
+    total_timeout: "30s",
   });
   const stats = state.stats || {};
   const traffic = stats.traffic || {};
@@ -46,8 +48,10 @@ function PageSystem({ state, dispatch }) {
     setProxyForm({
       max_attempts: proxy.max_attempts || 5,
       template_fallback_after_attempts: proxy.template_fallback_after_attempts !== false,
+      response_header_timeout: proxy.response_header_timeout || "3s",
+      total_timeout: proxy.total_timeout || proxy.request_timeout || "30s",
     });
-  }, [proxy.max_attempts, proxy.template_fallback_after_attempts, proxyDirty]);
+  }, [proxy.max_attempts, proxy.template_fallback_after_attempts, proxy.response_header_timeout, proxy.total_timeout, proxy.request_timeout, proxyDirty]);
 
   const setHealthField = (key, value) => {
     setHealthDirty(true);
@@ -112,6 +116,8 @@ function PageSystem({ state, dispatch }) {
       const result = await dispatch({ type: "updateProxySettings", config: {
         max_attempts: Number(proxyForm.max_attempts || 0),
         template_fallback_after_attempts: !!proxyForm.template_fallback_after_attempts,
+        response_header_timeout: proxyForm.response_header_timeout.trim(),
+        total_timeout: proxyForm.total_timeout.trim(),
       }});
       if (result) setProxyDirty(false);
     } finally {
@@ -158,12 +164,18 @@ function PageSystem({ state, dispatch }) {
       </div>
 
       <div className="card" style={{marginBottom:24}}>
-        <div className="card-h bordered"><h3>Proxy retry</h3><span className="sub">per-request failover</span></div>
+        <div className="card-h bordered"><h3>Proxy settings</h3><span className="sub">timeout and failover</span></div>
         <div className="card-body">
           <div className="field-row">
             <div className="field"><label className="field-label">Max node attempts</label>
               <input className="input mono" type="number" min="1" max="50" value={proxyForm.max_attempts}
                 onChange={e => setProxyField("max_attempts", e.target.value)} placeholder="5"/></div>
+            <div className="field"><label className="field-label">Response header timeout</label>
+              <input className="input mono" value={proxyForm.response_header_timeout}
+                onChange={e => setProxyField("response_header_timeout", e.target.value)} placeholder="3s"/></div>
+            <div className="field"><label className="field-label">Total timeout</label>
+              <input className="input mono" value={proxyForm.total_timeout}
+                onChange={e => setProxyField("total_timeout", e.target.value)} placeholder="30s"/></div>
             <div className="field">
               <label className="field-label">Template after node failures</label>
               <div className="row gap-12" style={{height:36, alignItems:"center"}}>
@@ -174,7 +186,7 @@ function PageSystem({ state, dispatch }) {
           </div>
           <div className="field-hint" style={{marginTop:10}}>Failed static or subscription nodes are marked offline immediately; health checks can bring them back online.</div>
           <div className="row gap-12" style={{marginTop:16}}>
-            <button className="btn primary" disabled={savingProxy} onClick={saveProxySettings}><Ic.check/> Save proxy retry</button>
+            <button className="btn primary" disabled={savingProxy} onClick={saveProxySettings}><Ic.check/> Save proxy settings</button>
             {savingProxy && <span className="field-hint">Saving…</span>}
           </div>
         </div>

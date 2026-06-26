@@ -91,6 +91,10 @@ health_check:
   max_fail: 3
 
 proxy:
+  # 单次 /proxy 通过某个出口访问目标站点时等待响应头的超时。
+  response_header_timeout: "3s"
+  # 单次 /proxy 通过某个出口访问目标站点的完整请求总超时。
+  total_timeout: "30s"
   # 单次 /proxy 出口执行失败时最多尝试的可用静态/订阅节点数量。
   max_attempts: 5
   # 可用节点全部失败后继续尝试同地区同类型模板节点。
@@ -189,7 +193,7 @@ Content-Type: application/json
 5. `residential=true` 查找家宽地区组，例如 `US-RES`。
 6. 地区组内存在可用静态节点或订阅节点时，按 `strategy` 选择节点。
 7. 订阅池开启 `try_offline` 且某地区只有一个离线订阅节点时，在模板 fallback 前允许该节点再尝试一次。
-8. 开启 `proxy.template_fallback_after_attempts` 时，地区组内可用节点连续失败达到 `proxy.max_attempts` 后继续尝试同类型模板节点；地区组内没有可用节点时也会直接使用同类型模板节点。
+8. 每个出口访问目标站点时使用 `proxy.response_header_timeout` 控制等待响应头的超时，默认 `3s`；使用 `proxy.total_timeout` 控制完整请求总时长，默认 `30s`；开启 `proxy.template_fallback_after_attempts` 时，地区组内可用节点连续失败达到 `proxy.max_attempts` 后继续尝试同类型模板节点；地区组内没有可用节点时也会直接使用同类型模板节点。
 9. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板。
 10. 没有可用节点也没有可用模板时返回错误。
 
@@ -294,7 +298,7 @@ Proxy API 调用 token 由后台生成，使用同一个 `jwt_secret` 签名，�
 | GET | /api/stats | 基础统计、节点池数量、指纹数量和流量指标 |
 | PUT | /api/system/logging | 修改当前日志级别并写入 `gateway.yaml` |
 | GET / PUT | /api/system/health-check | 查看或修改全局健康检查默认参数，并写入 `gateway.yaml` |
-| GET / PUT | /api/system/proxy | 查看或修改 `/proxy` 重试与模板兜底设置，并写入 `gateway.yaml` |
+| GET / PUT | /api/system/proxy | 查看或修改 `/proxy` 响应头等待超时、完整请求总超时、重试与模板兜底设置，并写入 `gateway.yaml` |
 | GET | /api/config/export | 导出当前 YAML 配置快照 |
 
 ## 开发计划

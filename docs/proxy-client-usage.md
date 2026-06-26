@@ -127,7 +127,7 @@ Content-Type: application/json
 
 ### 出口失败自动重试
 
-`/proxy` 在非直连出口执行失败时会按 `gateway.yaml` 的 `proxy.max_attempts` 继续尝试候选静态/订阅节点，默认最多 5 个。失败节点会立即标记为 `Alive=false`，后台健康检查成功后可恢复。开启 `proxy.template_fallback_after_attempts` 时，可用节点都失败后继续尝试同地区同类型模板节点。
+`/proxy` 通过单个出口访问目标站点时使用 `gateway.yaml` 的 `proxy.response_header_timeout` 控制等待响应头的超时，默认 `3s`。目标站点开始返回响应后，读取 body 继续受 `proxy.total_timeout` 约束，完整请求总超时默认 `30s`。在非直连出口执行失败时会按 `proxy.max_attempts` 继续尝试候选静态/订阅节点，默认最多 5 个。失败节点会立即标记为 `Alive=false`，后台健康检查成功后可恢复。开启 `proxy.template_fallback_after_attempts` 时，可用节点都失败后继续尝试同地区同类型模板节点。
 
 - `least-latency`：第一次使用最低延迟候选，失败后使用下一个延迟候选。
 - `random`：候选顺序随机，失败后使用下一个随机候选。
@@ -416,7 +416,7 @@ Authorization: Bearer <proxy_token>
 
 - `/proxy` 请求 JSON body 上限为 `10 MB`。
 - `/proxy` 上游响应 body 上限为 `32 MB`。
-- `/proxy` 目标请求超时时间为 `30s`。
+- `/proxy` 单个出口等待目标响应头的超时时间由 `proxy.response_header_timeout` 控制，默认 `3s`；完整请求总时长由 `proxy.total_timeout` 控制，默认 `30s`。
 - `/proxy` 默认不自动跟随 HTTP redirect。
 
 ## 给 AI Agent 的最小说明

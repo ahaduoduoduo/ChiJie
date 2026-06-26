@@ -56,12 +56,14 @@ node_pools:
 
 1. 请求指定 `egress.region`。
 2. 本地静态节点和订阅节点存在可用候选时，按请求 `strategy` 排序。
-3. `/proxy` 先尝试 `proxy.max_attempts` 个可用节点，默认 5 个；失败节点会立即标记为 `Alive=false`。
-4. 开启 `proxy.template_fallback_after_attempts` 时，可用节点都失败后进入模板 fallback；本地无可用候选时也直接进入模板 fallback。
-5. 模板按 `priority` 降序尝试；同优先级按池名排序。
-6. Chijie 模板返回网关错误时尝试下一个模板。
-7. 目标站点已经返回 HTTP 状态码时不尝试下一个模板。
-8. 普通请求没有普通节点和普通模板时，继续尝试同地区家宽节点和家宽模板。
+3. `/proxy` 对单个出口等待目标响应头使用 `proxy.response_header_timeout` 超时，默认 `3s`。
+4. `/proxy` 对单个出口完整请求使用 `proxy.total_timeout` 超时，默认 `30s`。
+5. `/proxy` 先尝试 `proxy.max_attempts` 个可用节点，默认 5 个；失败节点会立即标记为 `Alive=false`。
+6. 开启 `proxy.template_fallback_after_attempts` 时，可用节点都失败后进入模板 fallback；本地无可用候选时也直接进入模板 fallback。
+7. 模板按 `priority` 降序尝试；同优先级按池名排序。
+8. Chijie 模板返回网关错误时尝试下一个模板。
+9. 目标站点已经返回 HTTP 状态码时不尝试下一个模板。
+10. 普通请求没有普通节点和普通模板时，继续尝试同地区家宽节点和家宽模板。
 
 ## 测试行为
 

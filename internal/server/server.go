@@ -32,6 +32,12 @@ const MaxProxyResponseBytes = 32 * 1024 * 1024
 // DefaultProxyMaxAttempts 是一次 /proxy 请求在普通出口执行失败时默认允许尝试的可用节点数量。
 const DefaultProxyMaxAttempts = 5
 
+// DefaultProxyResponseHeaderTimeout 是一次 /proxy 出口 HTTP 请求等待目标响应头的默认超时。
+const DefaultProxyResponseHeaderTimeout = 3 * time.Second
+
+// DefaultProxyTotalTimeout 是一次 /proxy 出口 HTTP 请求从开始到响应体读取完成的默认总超时。
+const DefaultProxyTotalTimeout = 30 * time.Second
+
 // MaxChijieProxyHops 限制 Chijie 之间互相转发时的最大跳数，防止 A/B 循环。
 const MaxChijieProxyHops = 3
 
@@ -68,20 +74,27 @@ type Server struct {
 // ProxySettingsConfig 是 gateway.yaml / Admin API 使用的 /proxy 重试配置。
 // TemplateFallbackAfterAttempts 使用指针以区分“未配置”和“显式 false”。
 type ProxySettingsConfig struct {
-	MaxAttempts                   int   `yaml:"max_attempts" json:"max_attempts"`
-	TemplateFallbackAfterAttempts *bool `yaml:"template_fallback_after_attempts" json:"template_fallback_after_attempts"`
+	MaxAttempts                   int    `yaml:"max_attempts" json:"max_attempts"`
+	TemplateFallbackAfterAttempts *bool  `yaml:"template_fallback_after_attempts" json:"template_fallback_after_attempts"`
+	ResponseHeaderTimeout         string `yaml:"response_header_timeout" json:"response_header_timeout"`
+	TotalTimeout                  string `yaml:"total_timeout" json:"total_timeout"`
+	RequestTimeout                string `yaml:"request_timeout,omitempty" json:"request_timeout,omitempty"`
 }
 
 // ProxySettings 是运行时归一化后的 /proxy 重试配置。
 type ProxySettings struct {
-	MaxAttempts                   int  `json:"max_attempts" yaml:"max_attempts"`
-	TemplateFallbackAfterAttempts bool `json:"template_fallback_after_attempts" yaml:"template_fallback_after_attempts"`
+	MaxAttempts                   int           `json:"max_attempts" yaml:"max_attempts"`
+	TemplateFallbackAfterAttempts bool          `json:"template_fallback_after_attempts" yaml:"template_fallback_after_attempts"`
+	ResponseHeaderTimeout         time.Duration `json:"response_header_timeout" yaml:"response_header_timeout"`
+	TotalTimeout                  time.Duration `json:"total_timeout" yaml:"total_timeout"`
 }
 
 func DefaultProxySettings() ProxySettings {
 	return ProxySettings{
 		MaxAttempts:                   DefaultProxyMaxAttempts,
 		TemplateFallbackAfterAttempts: true,
+		ResponseHeaderTimeout:         DefaultProxyResponseHeaderTimeout,
+		TotalTimeout:                  DefaultProxyTotalTimeout,
 	}
 }
 
@@ -96,6 +109,25 @@ func ParseProxySettings(cfg *ProxySettingsConfig) (ProxySettings, error) {
 	if cfg.TemplateFallbackAfterAttempts != nil {
 		settings.TemplateFallbackAfterAttempts = *cfg.TemplateFallbackAfterAttempts
 	}
+	headerTimeoutText := strings.TrimSpace(cfg.ResponseHeaderTimeout)
+	if headerTimeoutText != "" {
+		timeout, err := time.ParseDuration(headerTimeoutText)
+		if err != nil || timeout <= 0 {
+			return settings, fmt.Errorf("proxy.response_header_timeout must be a positive duration")
+		}
+		settings.ResponseHeaderTimeout = timeout
+	}
+	totalTimeoutText := strings.TrimSpace(cfg.TotalTimeout)
+	if totalTimeoutText == "" {
+		totalTimeoutText = strings.TrimSpace(cfg.RequestTimeout)
+	}
+	if totalTimeoutText != "" {
+		timeout, err := time.ParseDuration(totalTimeoutText)
+		if err != nil || timeout <= 0 {
+			return settings, fmt.Errorf("proxy.total_timeout must be a positive duration")
+		}
+		settings.TotalTimeout = timeout
+	}
 	return ValidateProxySettings(settings)
 }
 
@@ -106,6 +138,12 @@ func ValidateProxySettings(settings ProxySettings) (ProxySettings, error) {
 	if settings.MaxAttempts > 50 {
 		return settings, fmt.Errorf("proxy.max_attempts must be between 1 and 50")
 	}
+	if settings.ResponseHeaderTimeout <= 0 {
+		settings.ResponseHeaderTimeout = DefaultProxyResponseHeaderTimeout
+	}
+	if settings.TotalTimeout <= 0 {
+		settings.TotalTimeout = DefaultProxyTotalTimeout
+	}
 	return settings, nil
 }
 
@@ -114,6 +152,8 @@ func ProxySettingsConfigFromSettings(settings ProxySettings) *ProxySettingsConfi
 	return &ProxySettingsConfig{
 		MaxAttempts:                   settings.MaxAttempts,
 		TemplateFallbackAfterAttempts: &value,
+		ResponseHeaderTimeout:         settings.ResponseHeaderTimeout.String(),
+		TotalTimeout:                  settings.TotalTimeout.String(),
 	}
 }
 
@@ -231,6 +271,36 @@ func (s *Server) UpdateProxySettings(settings ProxySettings) {
 	s.proxySettingsMu.Lock()
 	s.proxySettings = settings
 	s.proxySettingsMu.Unlock()
+}
+
+func (s *Server) proxyResponseHeaderTimeout() time.Duration {
+	return s.ProxySettings().ResponseHeaderTimeout
+}
+
+func (s *Server) proxyTotalTimeout() time.Duration {
+	return s.ProxySettings().TotalTimeout
+}
+
+func (s *Server) applyProxyResponseHeaderTimeout(transport *http.Transport) {
+	if transport == nil {
+		return
+	}
+	transport.ResponseHeaderTimeout = s.proxyResponseHeaderTimeout()
+}
+
+func (s *Server) newRemoteChijieClient() *http.Client {
+	transport := &http.Transport{}
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = base.Clone()
+	}
+	transport.ResponseHeaderTimeout = s.proxyResponseHeaderTimeout()
+	return &http.Client{
+		Transport: transport,
+		Timeout:   s.proxyTotalTimeout(),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 // Start 启动服务器
@@ -554,6 +624,7 @@ func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRo
 	}
 
 	transport := d.GetHTTPTransport()
+	s.applyProxyResponseHeaderTimeout(transport)
 	if route.TLSFingerprint != "" && s.fpManager != nil {
 		fpConfig, err := s.fpManager.ConfigFromValue(route.TLSFingerprint)
 		if err != nil {
@@ -572,8 +643,8 @@ func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRo
 
 		if fpConfig.WantsHTTP2() {
 			client := &http.Client{
-				Transport: fingerprint.NewHTTP2RoundTripperWithResponseLimit(helloID, spec, "", d.DialContext, fpConfig, MaxProxyResponseBytes),
-				Timeout:   30 * time.Second,
+				Transport: fingerprint.NewHTTP2RoundTripperWithResponseLimitAndHeaderTimeout(helloID, spec, "", d.DialContext, fpConfig, MaxProxyResponseBytes, s.proxyResponseHeaderTimeout()),
+				Timeout:   s.proxyTotalTimeout(),
 				CheckRedirect: func(req *http.Request, via []*http.Request) error {
 					return http.ErrUseLastResponse
 				},
@@ -600,7 +671,7 @@ func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRo
 
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   30 * time.Second,
+		Timeout:   s.proxyTotalTimeout(),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -666,12 +737,7 @@ func (s *Server) doRemoteChijieProxy(ctx context.Context, req *ProxyRequest, rou
 
 	client := s.remoteChijieClient
 	if client == nil {
-		client = &http.Client{
-			Timeout: 30 * time.Second,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
+		client = s.newRemoteChijieClient()
 	}
 
 	startTime := time.Now()

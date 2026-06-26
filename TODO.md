@@ -408,3 +408,11 @@
 
 - [x] 出口节点拨号、订阅拉取校验和 sing-box DNSRouter 使用内置公共 DNS resolver
 - [x] 内置 DNS 服务器使用 `1.1.1.1:53` 和 `8.8.8.8:53`，避免 Docker `127.0.0.11` 解析失败影响节点
+
+## P43 — Proxy 超时配置 ✅
+日期：2026-06-26
+
+- [x] `/proxy` 单个出口等待目标响应头超时改为 `proxy.response_header_timeout` 配置，默认 `3s`
+- [x] `/proxy` 单个出口完整请求总超时改为 `proxy.total_timeout` 配置，默认 `30s`
+- [x] System 页面支持查看和保存 Proxy response header timeout 与 total timeout
+- [x] `/api/system/proxy` 持久化响应头等待超时、完整请求总超时、重试次数和模板兜底设置

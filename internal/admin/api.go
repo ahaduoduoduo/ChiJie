@@ -1145,6 +1145,8 @@ func (s *Server) proxySettingsSnapshot() map[string]any {
 	return map[string]any{
 		"max_attempts":                     settings.MaxAttempts,
 		"template_fallback_after_attempts": settings.TemplateFallbackAfterAttempts,
+		"response_header_timeout":          settings.ResponseHeaderTimeout.String(),
+		"total_timeout":                    settings.TotalTimeout.String(),
 	}
 }
 
@@ -1160,6 +1162,8 @@ func (s *Server) persistProxySettings(settings proxyserver.ProxySettings) error 
 	cfg["proxy"] = map[string]any{
 		"max_attempts":                     settings.MaxAttempts,
 		"template_fallback_after_attempts": settings.TemplateFallbackAfterAttempts,
+		"response_header_timeout":          settings.ResponseHeaderTimeout.String(),
+		"total_timeout":                    settings.TotalTimeout.String(),
 	}
 	return atomicWriteYAML(path, cfg)
 }

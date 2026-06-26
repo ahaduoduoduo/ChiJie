@@ -38,6 +38,96 @@ func (d *testDialer) Name() string {
 	return d.name
 }
 
+func TestParseProxySettingsDefaultsResponseHeaderTimeout(t *testing.T) {
+	settings, err := ParseProxySettings(nil)
+	if err != nil {
+		t.Fatalf("parse default proxy settings: %v", err)
+	}
+	if settings.ResponseHeaderTimeout != 3*time.Second {
+		t.Fatalf("response header timeout = %s, want 3s", settings.ResponseHeaderTimeout)
+	}
+	if settings.TotalTimeout != 30*time.Second {
+		t.Fatalf("total timeout = %s, want 30s", settings.TotalTimeout)
+	}
+}
+
+func TestParseProxySettingsAcceptsTimeouts(t *testing.T) {
+	settings, err := ParseProxySettings(&ProxySettingsConfig{
+		MaxAttempts:           2,
+		ResponseHeaderTimeout: "750ms",
+		TotalTimeout:          "45s",
+	})
+	if err != nil {
+		t.Fatalf("parse proxy settings: %v", err)
+	}
+	if settings.ResponseHeaderTimeout != 750*time.Millisecond {
+		t.Fatalf("response header timeout = %s, want 750ms", settings.ResponseHeaderTimeout)
+	}
+	if settings.TotalTimeout != 45*time.Second {
+		t.Fatalf("total timeout = %s, want 45s", settings.TotalTimeout)
+	}
+}
+
+func TestParseProxySettingsAcceptsLegacyRequestTimeout(t *testing.T) {
+	settings, err := ParseProxySettings(&ProxySettingsConfig{RequestTimeout: "900ms"})
+	if err != nil {
+		t.Fatalf("parse legacy proxy settings: %v", err)
+	}
+	if settings.TotalTimeout != 900*time.Millisecond {
+		t.Fatalf("total timeout = %s, want 900ms", settings.TotalTimeout)
+	}
+}
+
+func TestParseProxySettingsRejectsInvalidResponseHeaderTimeout(t *testing.T) {
+	_, err := ParseProxySettings(&ProxySettingsConfig{ResponseHeaderTimeout: "0s"})
+	if err == nil {
+		t.Fatalf("expected invalid response header timeout error")
+	}
+}
+
+func TestParseProxySettingsRejectsInvalidTotalTimeout(t *testing.T) {
+	_, err := ParseProxySettings(&ProxySettingsConfig{TotalTimeout: "0s"})
+	if err == nil {
+		t.Fatalf("expected invalid total timeout error")
+	}
+}
+
+func TestDoProxyTotalTimeoutCoversResponseBodyRead(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte("late body"))
+	}))
+	defer target.Close()
+
+	s := &Server{
+		allowPrivateTargets: true,
+		proxySettings: ProxySettings{
+			MaxAttempts:                   1,
+			TemplateFallbackAfterAttempts: true,
+			ResponseHeaderTimeout:         time.Second,
+			TotalTimeout:                  50 * time.Millisecond,
+		},
+	}
+	started := time.Now()
+	_, _, _, err := s.doProxy(context.Background(), &ProxyRequest{
+		URL:    target.URL,
+		Method: http.MethodGet,
+	}, &egressRoute{Direct: true, Group: "DIRECT"})
+	if err == nil {
+		t.Fatalf("expected total timeout while reading response body")
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("total timeout took too long: %s", elapsed)
+	}
+	if !strings.Contains(err.Error(), "read response") {
+		t.Fatalf("expected body read timeout, got: %v", err)
+	}
+}
+
 func TestResolveEgressUsesTemplateWhenRegionGroupMissing(t *testing.T) {
 	dir := t.TempDir()
 	nodesPath := filepath.Join(dir, "nodes.yaml")

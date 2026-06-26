@@ -30,6 +30,10 @@ health_check:
   max_fail: 3
 
 proxy:
+  # 单次 /proxy 通过某个出口访问目标站点时等待响应头的超时。
+  response_header_timeout: "3s"
+  # 单次 /proxy 通过某个出口访问目标站点的完整请求总超时。
+  total_timeout: "30s"
   # 单次 /proxy 出口执行失败时，最多尝试多少个可用静态/订阅节点。
   max_attempts: 5
   # 可用节点都失败后，是否继续尝试同地区同类型模板节点。

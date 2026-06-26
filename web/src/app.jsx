@@ -416,7 +416,7 @@ function App() {
         case "updateProxySettings": {
           const result = await api.updateProxySettings(action.config);
           await refreshData(true);
-          toast("Proxy retry saved");
+          toast("Proxy settings saved");
           return result;
         }
         default:

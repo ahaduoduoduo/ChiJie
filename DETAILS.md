@@ -222,7 +222,7 @@ JA3/JA4/Akamai 都按 raw 输入保存，测试结果只展示远端返回的真
 - `GET /api/traffic`：返回请求记录、时间序列和聚合指标。
 - `PUT /api/system/logging`：修改运行时日志级别，并写回 `gateway.yaml`。
 - `GET /api/system/health-check` / `PUT /api/system/health-check`：读取或保存全局健康检查默认参数，并写回 `gateway.yaml`。
-- `GET /api/system/proxy` / `PUT /api/system/proxy`：读取或保存 `/proxy` 重试次数和模板兜底设置，并写回 `gateway.yaml`。
+- `GET /api/system/proxy` / `PUT /api/system/proxy`：读取或保存 `/proxy` 响应头等待超时、完整请求总超时、重试次数和模板兜底设置，并写回 `gateway.yaml`。
 - `GET /api/config/export`：导出当前配置目录下的 YAML 配置快照。
 
 规则管理 API 已从后端移除。当前 `web/` 静态原型已接入 Admin API，构建产物复制到 `internal/admin/dist/` 后会随 Go 二进制嵌入。

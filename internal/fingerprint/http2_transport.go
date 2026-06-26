@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"chijie/internal/util"
 
@@ -25,6 +26,7 @@ type HTTP2RoundTripper struct {
 	dialContext func(context.Context, string, string) (net.Conn, error)
 	config      *FingerprintConfig
 	maxBody     int64
+	headerWait  time.Duration
 }
 
 const defaultHTTP2ResponseBodyLimit = 32 * 1024 * 1024
@@ -36,6 +38,11 @@ func NewHTTP2RoundTripper(helloID *tls.ClientHelloID, spec *tls.ClientHelloSpec,
 
 // NewHTTP2RoundTripperWithResponseLimit 创建带响应体上限的 HTTP/2 指纹 RoundTripper。
 func NewHTTP2RoundTripperWithResponseLimit(helloID *tls.ClientHelloID, spec *tls.ClientHelloSpec, serverName string, dialContext func(context.Context, string, string) (net.Conn, error), config *FingerprintConfig, maxBody int64) http.RoundTripper {
+	return NewHTTP2RoundTripperWithResponseLimitAndHeaderTimeout(helloID, spec, serverName, dialContext, config, maxBody, 0)
+}
+
+// NewHTTP2RoundTripperWithResponseLimitAndHeaderTimeout 创建带响应体上限和响应头等待超时的 HTTP/2 指纹 RoundTripper。
+func NewHTTP2RoundTripperWithResponseLimitAndHeaderTimeout(helloID *tls.ClientHelloID, spec *tls.ClientHelloSpec, serverName string, dialContext func(context.Context, string, string) (net.Conn, error), config *FingerprintConfig, maxBody int64, headerWait time.Duration) http.RoundTripper {
 	if maxBody <= 0 {
 		maxBody = defaultHTTP2ResponseBodyLimit
 	}
@@ -49,6 +56,7 @@ func NewHTTP2RoundTripperWithResponseLimit(helloID *tls.ClientHelloID, spec *tls
 		dialContext: dialContext,
 		config:      config.Canonical(),
 		maxBody:     maxBody,
+		headerWait:  headerWait,
 	}
 }
 
@@ -113,7 +121,7 @@ func (rt *HTTP2RoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 		}
 	}
 
-	resp, err := readHTTP2Response(framer, req, rt.maxBody)
+	resp, err := readHTTP2Response(conn, framer, req, rt.maxBody, rt.headerWait)
 	if err != nil {
 		return nil, err
 	}
@@ -487,7 +495,7 @@ func writeHTTP2Body(framer *http2.Framer, body []byte) error {
 	return nil
 }
 
-func readHTTP2Response(framer *http2.Framer, req *http.Request, maxBody int64) (*http.Response, error) {
+func readHTTP2Response(conn net.Conn, framer *http2.Framer, req *http.Request, maxBody int64, headerWait time.Duration) (*http.Response, error) {
 	var body bytes.Buffer
 	var headerBlock bytes.Buffer
 	var headers http.Header
@@ -496,6 +504,26 @@ func readHTTP2Response(framer *http2.Framer, req *http.Request, maxBody int64) (
 	headersEnded := false
 	if maxBody <= 0 {
 		maxBody = defaultHTTP2ResponseBodyLimit
+	}
+	headerDeadlineSet := false
+	restoreReadDeadline := func() {
+		if conn == nil || !headerDeadlineSet {
+			return
+		}
+		if deadline, ok := req.Context().Deadline(); ok {
+			_ = conn.SetReadDeadline(deadline)
+		} else {
+			_ = conn.SetReadDeadline(time.Time{})
+		}
+		headerDeadlineSet = false
+	}
+	if conn != nil && headerWait > 0 {
+		headerDeadline := time.Now().Add(headerWait)
+		if deadline, ok := req.Context().Deadline(); ok && deadline.Before(headerDeadline) {
+			headerDeadline = deadline
+		}
+		_ = conn.SetReadDeadline(headerDeadline)
+		headerDeadlineSet = true
 	}
 
 	for {
@@ -524,6 +552,7 @@ func readHTTP2Response(framer *http2.Framer, req *http.Request, maxBody int64) (
 				headers = parsed
 				statusCode = code
 				headersEnded = true
+				restoreReadDeadline()
 				headerBlock.Reset()
 			}
 			if typed.StreamEnded() {
@@ -542,6 +571,7 @@ func readHTTP2Response(framer *http2.Framer, req *http.Request, maxBody int64) (
 				headers = parsed
 				statusCode = code
 				headersEnded = true
+				restoreReadDeadline()
 				headerBlock.Reset()
 			}
 		case *http2.DataFrame:
