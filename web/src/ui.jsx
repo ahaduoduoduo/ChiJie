@@ -73,12 +73,12 @@ function Seg({ options, value, onChange }) {
   );
 }
 
-function RegionPill({ code, residential, flag }) {
+function RegionPill({ code, residential, premium, flag }) {
   // derive flag from code prefix if not given
-  const baseCode = code?.replace(/-RES$/, "");
+  const baseCode = window.PG?.baseRegionCode ? window.PG.baseRegionCode(code) : String(code || "").replace(/-(RES|PREM)/g, "");
   const flagEmoji = flag || window.PG?.regionFlag?.(baseCode) || null;
   return (
-    <span className={`pill region ${residential ? "res" : ""}`}>
+    <span className={`pill region ${residential ? "res" : ""} ${premium ? "premium" : ""}`}>
       {flagEmoji && <span style={{fontSize:11, lineHeight:1, marginRight:1, filter:"saturate(0.85)"}}>{flagEmoji}</span>}
       {code}
     </span>
@@ -176,22 +176,203 @@ function StatusCode({ code }) {
   return <span className="mono" style={{color: ok ? "var(--fg-0)" : "var(--fg-2)", fontWeight: ok ? 500 : 400}}>{code || "ERR"}</span>;
 }
 
-function RequestDetailContent({ request }) {
+function parseURL(value) {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function isRequestError(request) {
+  return request && (request.status === 0 || request.status >= 400 || !!request.error);
+}
+
+function queryEntries(parsed) {
+  if (!parsed) return [];
+  const byKey = new Map();
+  parsed.searchParams.forEach((value, key) => {
+    const item = byKey.get(key);
+    if (item) {
+      item.count += 1;
+      return;
+    }
+    byKey.set(key, { key, value, count: 1 });
+  });
+  return Array.from(byKey.values());
+}
+
+function initialSelectedQueryKeys(entries) {
+  const volatile = /(^|[_-])(v?hash|sig(nature)?|token|auth|expires?|exp|timestamp|time|ts|vendtime)([_-]|$)/i;
+  const selected = entries.filter(item => volatile.test(item.key)).map(item => item.key);
+  return selected.length ? selected : [];
+}
+
+function splitURLParts(parsed) {
+  return {
+    host: parsed.hostname.split(".").filter(Boolean).map(value => ({ value, any: false })),
+    path: parsed.pathname.split("/").filter(Boolean).map(value => ({ value, any: false })),
+  };
+}
+
+function patternFromParts(parts, separator, prefix = "") {
+  return prefix + parts.map(part => part.any ? "*" : part.value).join(separator);
+}
+
+function ruleNameFromPatterns(hostPattern, pathPattern) {
+  const tail = pathPattern.split("/").filter(Boolean).slice(-1)[0] || "url";
+  return `${hostPattern}-${tail}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "traffic-url-rule";
+}
+
+function URLPartButtons({ title, parts, onToggle }) {
+  return (
+    <div className="url-rule-section">
+      <div className="url-rule-label">{title}</div>
+      <div className="url-rule-parts">
+        {parts.map((part, index) => (
+          <React.Fragment key={`${title}-${index}`}>
+            {index > 0 && <span className="url-rule-sep">{title === "Host" ? "." : "/"}</span>}
+            <button
+              type="button"
+              className={`url-rule-part mono ${part.any ? "any" : ""}`}
+              onClick={() => onToggle(index)}
+              title={part.any ? "Match any segment" : "Use exact segment"}
+            >
+              {part.any ? "*" : part.value}
+            </button>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TrafficRuleBuilder({ request, onSave }) {
+  const parsed = React.useMemo(() => parseURL(request?.url), [request?.url]);
+  const entries = React.useMemo(() => queryEntries(parsed), [parsed]);
+  const [hostParts, setHostParts] = useState([]);
+  const [pathParts, setPathParts] = useState([]);
+  const [selectedKeys, setSelectedKeys] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!parsed) return;
+    const parts = splitURLParts(parsed);
+    setHostParts(parts.host);
+    setPathParts(parts.path);
+    setSelectedKeys(initialSelectedQueryKeys(entries));
+  }, [parsed, entries]);
+
+  const hostPattern = patternFromParts(hostParts, ".", "");
+  const pathPattern = patternFromParts(pathParts, "/", "/");
+  const previewURL = React.useMemo(() => {
+    if (!parsed) return "";
+    const clone = new URL(parsed.toString());
+    selectedKeys.forEach(key => clone.searchParams.delete(key));
+    clone.hash = "";
+    clone.search = clone.searchParams.toString();
+    return clone.toString();
+  }, [parsed, selectedKeys]);
+
+  if (!parsed || entries.length === 0) return null;
+
+  const toggleHost = (index) => setHostParts(parts => parts.map((part, i) => i === index ? { ...part, any: !part.any } : part));
+  const togglePath = (index) => setPathParts(parts => parts.map((part, i) => i === index ? { ...part, any: !part.any } : part));
+  const toggleKey = (key) => setSelectedKeys(keys => keys.includes(key) ? keys.filter(item => item !== key) : [...keys, key].sort());
+
+  const save = async () => {
+    if (!selectedKeys.length || saving) return;
+    setSaving(true);
+    try {
+      return await onSave?.({
+        name: ruleNameFromPatterns(hostPattern, pathPattern),
+        match: {
+          host_pattern: hostPattern,
+          path_pattern: pathPattern,
+        },
+        query: {
+          drop_keys: selectedKeys,
+          sort: true,
+        },
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="url-rule-builder">
+      <div className="url-rule-head">
+        <div>
+          <div className="url-rule-title">Error merge rule</div>
+          <div className="url-rule-copy">Set path segments to * and choose query keys to ignore.</div>
+        </div>
+      </div>
+
+      <URLPartButtons title="Host" parts={hostParts} onToggle={toggleHost}/>
+      <URLPartButtons title="Path" parts={pathParts} onToggle={togglePath}/>
+
+      <div className="url-rule-section">
+        <div className="url-rule-label">Drop query keys</div>
+        <div className="url-rule-query-list">
+          {entries.map(item => (
+            <label className="url-rule-query" key={item.key}>
+              <input type="checkbox" checked={selectedKeys.includes(item.key)} onChange={() => toggleKey(item.key)} />
+              <span className="mono url-rule-query-key">{item.key}</span>
+              <span className="mono url-rule-query-value">{item.value}{item.count > 1 ? ` +${item.count - 1}` : ""}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="url-rule-preview">
+        <div className="url-rule-label">Rule</div>
+        <div className="mono">host: {hostPattern}</div>
+        <div className="mono">path: {pathPattern}</div>
+        <div className="url-rule-label" style={{marginTop:10}}>Grouped target</div>
+        <div className="mono url-rule-preview-url">{previewURL}</div>
+      </div>
+
+      <div className="row" style={{justifyContent:"flex-end", marginTop:12}}>
+        <button className="btn primary" disabled={!selectedKeys.length || saving} onClick={save}>
+          <Ic.check/> {saving ? "Saving..." : "Save rule"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RequestDetailContent({ request, onSaveGroupingRule }) {
   if (!request) return null;
-  const replayRegion = request.region || (request.group || "").replace(/-RES$/, "");
+  const replayRegion = request.region || (window.PG?.baseRegionCode ? window.PG.baseRegionCode(request.group) : String(request.group || "").replace(/-(RES|PREM)/g, ""));
+  const [ruleOpen, setRuleOpen] = useState(false);
+  const parsed = parseURL(request.url);
+  const canEditRule = !!onSaveGroupingRule && isRequestError(request) && queryEntries(parsed).length > 0;
+  const saveGroupingRule = async (rule) => {
+    const result = await onSaveGroupingRule(rule);
+    if (result !== null) setRuleOpen(false);
+    return result;
+  };
   return (
     <div className="request-detail">
       <div className="row" style={{gap:8, flexWrap:"wrap", marginBottom:24}}>
         <span className="pill mono"><StatusCode code={request.status}/></span>
         <span className="pill mono">{request.method}</span>
         {request.type === "tunnel" && <span className="pill res">WS tunnel</span>}
-        <RegionPill code={request.group} residential={request.residential}/>
+        <RegionPill code={request.group} residential={request.residential} premium={request.premium}/>
+        {request.premium && <span className="pill premium mono">premium</span>}
         {request.group_count > 1 && <span className="pill mono">x{request.group_count}</span>}
         {request.template && <span className="pill mono">template</span>}
+        {canEditRule && (
+          <button className="btn sm" onClick={() => setRuleOpen(open => !open)} style={{marginLeft:"auto"}}>
+            <Ic.filter/> Ignore URL params
+          </button>
+        )}
       </div>
       <div className="kv" style={{rowGap:14}}>
         <div className="k">Time</div><div className="v mono">{fmtUTC8(request.ts)}</div>
         <div className="k">URL</div><div className="v mono" style={{wordBreak:"break-all", fontSize:11.5, lineHeight:1.5}}>{request.url}</div>
+        {request.group_target && <><div className="k">Group target</div><div className="v mono" style={{wordBreak:"break-all", fontSize:11.5, lineHeight:1.5}}>{request.group_target}</div></>}
         <div className="k">Strategy</div><div className="v mono">{request.strategy}</div>
         <div className="k">Pool</div><div className="v mono">{request.pool}</div>
         <div className="k">Node</div><div className="v mono" style={{fontSize:11.5}}>{request.node}</div>
@@ -200,6 +381,7 @@ function RequestDetailContent({ request }) {
         <div className="k">Bytes</div><div className="v mono">{fmtBytes(request.bytes)}</div>
         {request.error && <><div className="k">Error</div><div className="v mono" style={{fontSize:11.5}}>{request.error}</div></>}
       </div>
+      {ruleOpen && <TrafficRuleBuilder request={request} onSave={saveGroupingRule}/>}
       <div className="sep-h"/>
       <div className="muted-2" style={{fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10, fontWeight:500}}>Replay payload</div>
       <pre className="mono request-replay" style={{margin:0, padding:14, background:"var(--bg-2)", border:"1px solid var(--line-2)", borderRadius:6, fontSize:11.5, overflow:"auto", lineHeight:1.55, color:"var(--fg-1)"}}>{`POST /proxy
@@ -212,6 +394,7 @@ Authorization: Bearer <proxy_token>
     "region": "${replayRegion}",
     "strategy": "${request.strategy}",
     "residential": ${request.residential},
+    "premium": ${request.premium},
     "tls_fingerprint": "${request.tls}"
   }
 }`}</pre>

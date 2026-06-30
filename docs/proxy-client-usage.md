@@ -73,6 +73,7 @@ Content-Type: application/json
     "region": "US",
     "strategy": "least-latency",
     "residential": false,
+    "premium": false,
     "tls_fingerprint": "chrome"
   }
 }
@@ -92,6 +93,7 @@ Content-Type: application/json
 | `egress.max_latency_ms` | number | 否 | 配合 `any=true` 使用，按最近健康检查延迟过滤候选出口 |
 | `egress.strategy` | string | 否 | `random`、`round-robin`、`least-latency`，默认 `random` |
 | `egress.residential` | boolean | 否 | 是否要求家宽出口；为 `false` 时优先普通出口，普通出口不可用时可降级使用同地区家宽出口 |
+| `egress.premium` | boolean | 否 | 是否要求高端出口；为 `true` 且未指定地区时会自动选择任意高端非直连出口 |
 | `egress.tls_fingerprint` | string | 否 | TLS 指纹名称或指纹配置字符串，例如 `chrome` |
 
 地区码会标准化为大写二字母代码。英国使用标准码 `GB`；传入 `UK` 时也会归一为 `GB`。
@@ -165,7 +167,7 @@ curl -sS "$CHIJIE_BASE_URL/proxy" \
   }'
 ```
 
-不传 `egress.region` 且 `egress.any` 不为 `true` 时使用直连出口。
+不传 `egress.region`、`egress.any` 不为 `true` 且 `egress.premium` 不为 `true` 时使用直连出口。
 
 ### 调用示例：指定美国出口
 
@@ -434,6 +436,19 @@ Authorization: Bearer <proxy_token>
 ```
 
 家宽出口会查找 `US-RES` 这类地区组。是否可用取决于服务所有者是否配置了家宽节点或家宽模板。
+
+### 高端出口
+
+```json
+{
+  "egress": {
+    "premium": true,
+    "strategy": "least-latency"
+  }
+}
+```
+
+高端出口会查找 `US-PREM`、`US-RES-PREM` 或 `ANY-PREM` 这类地区组。适合访问开启 Cloudflare 防护、普通节点容易被阻挡的网站。
 
 ### TLS 指纹
 

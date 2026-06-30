@@ -83,10 +83,12 @@ chijie/
 │   ├── docker-deployment.md       # Docker 构建、Compose 部署和端口模型
 │   ├── dockerhub-release.md       # Docker Hub 自动发布、Secrets 和 VPS 拉取镜像部署
 │   ├── parameter-driven-egress.md # 参数驱动出口模型
+│   ├── premium-egress.md          # 高端出口节点配置和请求语义
 │   ├── proxy-client-usage.md      # 外部服务接入 Proxy API 的独立使用文档
 │   ├── subscription-routing.md    # 订阅节点、地区组和模板节点说明
 │   ├── template-fallback.md       # 模板 fallback、远端 Chijie 和优先级规则
-│   └── tls-fingerprints.md        # TLS 指纹来源、extra_fp 兼容和测试接口语义
+│   ├── tls-fingerprints.md        # TLS 指纹来源、extra_fp 兼容和测试接口语义
+│   └── traffic-url-grouping.md    # Traffic URL 参数忽略和失败合并规则
 ├── build.sh                     # 构建脚本：前端 build + 复制 dist + Go 编译
 ├── Dockerfile                   # 多阶段容器构建：前端 build + Go build + 运行镜像
 ├── docker-compose.yml           # Docker 部署：Proxy API 暴露，Admin 仅绑定宿主机本机地址
@@ -114,7 +116,7 @@ chijie/
 - `headers`：目标请求 Header，包括调用方显式传入的 `Cookie`。
 - `payload`：目标请求 Body。
 - `follow_redirects`：是否自动跟随 HTTP redirect，缺省为 `false`。
-- `egress`：出口参数，包括 `region`、`any`、`max_latency_ms`、`strategy`、`residential`、`tls_fingerprint`。
+- `egress`：出口参数，包括 `region`、`any`、`max_latency_ms`、`strategy`、`residential`、`premium`、`tls_fingerprint`。
 
 WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读取首帧 JSON，通过首帧 `authorization` 或握手 `Authorization` Header 完成认证。`ws://` / `wss://` 目标会执行上游 WebSocket 握手并使用首帧 `headers` 与 `payload`；`http://` / `https://` 目标保持 raw TCP 转发。`wss://` 上游握手支持通过当前出口应用请求级 TLS 指纹。
 
@@ -129,17 +131,22 @@ WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读�
 
 核心选择入口：
 
-- `SelectEgress(region, strategy, residential)`：按请求参数选择出口。
+- `SelectEgress(region, strategy, residential)`：按请求参数选择出口，保留给普通/家宽旧调用。
+- `SelectEgressFor(region, strategy, selector)`：按请求参数和 `premium` 节点类别选择出口。
 - `SelectAnyEgress(strategy, residential, maxLatency)`：不指定地区时选择任意非直连静态/订阅出口。
+- `SelectAnyEgressFor(strategy, selector, maxLatency)`：不指定地区时按节点类别选择任意非直连静态/订阅出口。
 - `NormalizeRegionCode(value)`：标准化二字母地区码。
 - `NormalizeStrategy(value)`：标准化选择策略。
 - `EgressGroup(region, residential)`：生成地区组代码，例如 `US`、`US-RES`。
+- `EgressGroupFor(region, selector)`：生成带高端后缀的地区组代码，例如 `US-PREM`、`US-RES-PREM`。
 - `AnyEgressGroup(residential)`：生成地区无关组代码，例如 `ANY`、`ANY-RES`。
+- `AnyEgressGroupFor(selector)`：生成带高端后缀的地区无关组代码，例如 `ANY-PREM`。
 
 选择规则：
 
 - 普通请求只使用普通节点和普通模板。
 - 家宽请求只使用家宽节点和家宽模板。
+- 高端请求只使用高端节点和高端模板；未指定地区时自动选择任意高端非直连节点。
 - 静态节点和订阅节点优先，单次 `/proxy` 默认最多尝试 5 个可用节点。
 - 模板节点按 `priority` 降序尝试，同优先级按池名排序。
 - 地区无关请求只使用非 `direct` 的静态节点和订阅节点，不使用直连或模板节点。
@@ -198,12 +205,12 @@ JA3/JA4/Akamai 都按 raw 输入保存，测试结果只展示远端返回的真
 记录 HTTP 请求和 WebSocket 隧道的运行结果：
 
 - 请求类型、方法、URL、目标标识。
-- 地区、地区组、策略、家宽标识。
+- 地区、地区组、策略、家宽标识、高端标识。
 - 出口池、出口节点、来源类型、是否模板。
 - TLS 指纹、状态码、耗时、字节数和错误文本。
-- 原始 trace、合并展示 trace、分钟级有效请求数、成功率、成功请求平均延迟 / P95 和活跃隧道数。
+- 原始 trace、合并展示 trace、分钟级有效请求数、成功率、成功请求平均延迟 / P95、活跃隧道数和 URL 规范化规则。
 
-失败请求按 `kind + url/target + egress_group` 合并为有效错误，不把 header、payload、出口节点或策略纳入合并键。成功请求不合并；延迟指标只使用成功请求，避免目标站点长时间无响应导致的重复失败污染延迟视图。
+失败请求按 `kind + url/target + egress_group` 合并为有效错误，不把 header、payload、出口节点或策略纳入合并键。成功请求不合并；延迟指标只使用成功请求，避免目标站点长时间无响应导致的重复失败污染延迟视图。`traffic.failure_grouping.url_normalization.rules` 支持在生成合并键前删除易变 query 参数，Admin 请求详情可通过 Host/Path 片段按钮和 Query 复选框生成 `host_pattern`、`path_pattern` 和 `drop_keys`；完整说明见 `docs/traffic-url-grouping.md`。
 
 ### admin（管理 API）
 
@@ -280,7 +287,7 @@ go build -tags with_utls -o chijie ./cmd/gateway/
 
 ## 请求流程
 
-参数模型详见 `docs/parameter-driven-egress.md`。订阅节点、地区组和模板节点详见 `docs/subscription-routing.md`。
+参数模型详见 `docs/parameter-driven-egress.md`。订阅节点、地区组和模板节点详见 `docs/subscription-routing.md`。高端出口详见 `docs/premium-egress.md`。
 
 ```
 # HTTP 代理

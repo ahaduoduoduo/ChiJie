@@ -389,6 +389,13 @@ function App() {
           baseDispatch({ type: "setTraffic", traffic });
           return traffic;
         }
+        case "addTrafficGroupingRule": {
+          const result = await api.addTrafficGroupingRule(action.rule);
+          const traffic = await api.getTraffic(trafficLimit);
+          baseDispatch({ type: "setTraffic", traffic });
+          toast("Traffic rule saved");
+          return result;
+        }
         case "addFingerprint": {
           const result = await api.addFingerprint({ name: action.name, config: action.config, configText: action.configText });
           await refreshData(true);
@@ -476,7 +483,7 @@ function App() {
       <div className="main">
         <Topbar page={page} state={state} onRefresh={() => dispatch({ type: "refreshData" })} onLogout={logout} busy={busy} />
         {state.error && <div className="notice page-notice">{state.error}</div>}
-        {page === "overview" && <window.PageOverview state={state} />}
+	        {page === "overview" && <window.PageOverview state={state} dispatch={dispatch} />}
         {page === "egress" && <window.PageEgress state={state} dispatch={dispatch} />}
         {page === "subscriptions" && <window.PageSubscriptions state={state} dispatch={dispatch} />}
         {page === "templates" && <window.PageTemplates state={state} dispatch={dispatch} />}

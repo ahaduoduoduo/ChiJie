@@ -13,6 +13,7 @@ import (
 	"chijie/internal/fingerprint"
 	"chijie/internal/pool"
 	proxyserver "chijie/internal/server"
+	"chijie/internal/traffic"
 )
 
 type fakeProxyRuntime struct {
@@ -117,6 +118,73 @@ func TestValidatePoolConfigAcceptsManualAndDailySubscriptionRefresh(t *testing.T
 	}
 }
 
+func TestSubscriptionNodeConfigPersistsPremiumTag(t *testing.T) {
+	dir := t.TempDir()
+	subscription := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNz@proxy.example.com:1080#US%20Node%2001"))
+	}))
+	defer subscription.Close()
+
+	nodesPath := filepath.Join(dir, "nodes.yaml")
+	if err := os.WriteFile(nodesPath, []byte(`
+node_pools:
+  airport:
+    source: subscription
+    url: `+subscription.URL+`
+`), 0600); err != nil {
+		t.Fatalf("write nodes config: %v", err)
+	}
+
+	manager := pool.NewManager()
+	server := NewServer("127.0.0.1:0", manager, fingerprint.NewManager(), dir, "", "1234567890123456", "24h", nil)
+
+	reqBody := []byte(`{
+		"pool":"airport",
+		"node":"US Node 01",
+		"server":"proxy.example.com",
+		"port":1080,
+		"region":"US",
+		"alias":"us-premium",
+		"tags":["streaming"],
+		"residential":true,
+		"premium":true
+	}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/nodes/subscription/node", bytes.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT subscription node status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := loadNodesConfig(nodesPath)
+	if err != nil {
+		t.Fatalf("load stored nodes config: %v", err)
+	}
+	cfg := stored.NodePools["airport"]
+	if got := cfg.NodeTags["US Node 01"]; !containsAll(got, "streaming", "residential", "premium") {
+		t.Fatalf("unexpected node tags: %#v", got)
+	}
+	if got := cfg.NodeServerTags["proxy.example.com:1080"]; !containsAll(got, "streaming", "residential", "premium") {
+		t.Fatalf("unexpected server tags: %#v", got)
+	}
+	if cfg.NodeServerRegions["proxy.example.com:1080"] != "US" || cfg.NodeServerAliases["proxy.example.com:1080"] != "us-premium" {
+		t.Fatalf("unexpected server metadata: %#v %#v", cfg.NodeServerRegions, cfg.NodeServerAliases)
+	}
+}
+
+func containsAll(values []string, wants ...string) bool {
+	seen := map[string]bool{}
+	for _, value := range values {
+		seen[value] = true
+	}
+	for _, want := range wants {
+		if !seen[want] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestHealthCheckSettingsPersistsAndUpdatesChecker(t *testing.T) {
 	dir := t.TempDir()
 	gatewayPath := filepath.Join(dir, "gateway.yaml")
@@ -217,5 +285,71 @@ log:
 	}
 	if stored.Proxy.MaxAttempts != 8 || stored.Proxy.MaxRedirects != 6 || stored.Proxy.TemplateFallbackAfterAttempts == nil || *stored.Proxy.TemplateFallbackAfterAttempts || stored.Proxy.ResponseHeaderTimeout != "4s" || stored.Proxy.TotalTimeout != "45s" {
 		t.Fatalf("unexpected persisted proxy settings: %#v", stored.Proxy)
+	}
+}
+
+func TestTrafficGroupingRulePersistsAndUpdatesRuntime(t *testing.T) {
+	dir := t.TempDir()
+	gatewayPath := filepath.Join(dir, "gateway.yaml")
+	if err := os.WriteFile(gatewayPath, []byte(`
+server:
+  listen: ":8080"
+admin:
+  jwt_secret: "1234567890123456"
+log:
+  level: "info"
+  file: ""
+`), 0600); err != nil {
+		t.Fatalf("write gateway config: %v", err)
+	}
+
+	store := traffic.NewStore(1000)
+	server := NewServer("127.0.0.1:0", pool.NewManager(), fingerprint.NewManager(), dir, "", "1234567890123456", "24h", nil, store)
+
+	reqBody := []byte(`{
+		"name":"pipecdn-hls",
+		"match":{"host_pattern":"*.pipecdn.vip","path_pattern":"/ppot/_definst_/*/lvod/*/chunklist.m3u8"},
+		"query":{"drop_keys":["vendtime","vhash"],"sort":true}
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/traffic/grouping-rules", bytes.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST traffic grouping rule status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var stored struct {
+		Traffic traffic.Config `yaml:"traffic"`
+	}
+	if err := loadYAML(gatewayPath, &stored); err != nil {
+		t.Fatalf("load persisted gateway config: %v", err)
+	}
+	rules := stored.Traffic.FailureGrouping.URLNormalization.Rules
+	if len(rules) != 1 {
+		t.Fatalf("stored rules = %d want 1", len(rules))
+	}
+	if rules[0].Match.HostPattern != "*.pipecdn.vip" || rules[0].Match.PathPattern != "/ppot/_definst_/*/lvod/*/chunklist.m3u8" {
+		t.Fatalf("unexpected stored rule match: %#v", rules[0].Match)
+	}
+	if len(rules[0].Query.DropKeys) != 2 {
+		t.Fatalf("unexpected stored drop keys: %#v", rules[0].Query.DropKeys)
+	}
+
+	store.Record(traffic.Trace{
+		Kind:        "proxy",
+		URL:         "https://sss1-e1.pipecdn.vip/ppot/_definst_/mp4:s1/lvod/a.mp4/chunklist.m3u8?vendtime=1&vhash=a&lb=same",
+		EgressGroup: "CA",
+		Status:      502,
+		Error:       "bad gateway",
+	})
+	store.Record(traffic.Trace{
+		Kind:        "proxy",
+		URL:         "https://sss1-e1.pipecdn.vip/ppot/_definst_/mp4:s1/lvod/a.mp4/chunklist.m3u8?vendtime=2&vhash=b&lb=same",
+		EgressGroup: "CA",
+		Status:      502,
+		Error:       "bad gateway",
+	})
+	if got := store.Snapshot(10).Metrics.Failures; got != 1 {
+		t.Fatalf("runtime traffic config did not merge failures, got %d", got)
 	}
 }

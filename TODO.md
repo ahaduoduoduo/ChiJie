@@ -450,3 +450,20 @@
 - [x] `follow_redirects=true` 时返回最终页面响应，并通过 `X-Chijie-*` 响应头返回最终 URL 与跳转明细
 - [x] 新增 `proxy.max_redirects` 全局配置，默认 `5`，Admin System 页面支持保存
 - [x] 每次跳转目标继续执行目标 URL 安全校验，达到最大跳转次数时返回最后一个 3xx 响应
+
+## P49 — Traffic URL 参数忽略规则编辑 ✅
+日期：2026-07-01
+
+- [x] 新增 `traffic.failure_grouping.url_normalization.rules`，失败合并前可按 `host_pattern` / `path_pattern` 删除指定 query key
+- [x] `/api/traffic/grouping-rules` 支持从 Admin 保存 URL 规范化规则并立即更新运行时 Traffic Store
+- [x] 请求详情增加 `Ignore URL params` 编辑器，Host 和 Path 片段可切换为 `*`，Query 参数可勾选加入 `drop_keys`
+- [x] README、DETAILS、`docs/traffic-url-grouping.md` 和示例配置补充规则说明
+
+## P50 — 高端出口节点 ✅
+日期：2026-07-01
+
+- [x] 节点、订阅池和订阅节点标签支持 `premium` 高端标识
+- [x] `/proxy` 和 `/tunnel` 支持 `egress.premium=true`，未指定地区时自动选择任意高端非直连出口
+- [x] 地区组支持 `US-PREM`、`US-RES-PREM` 和 `ANY-PREM`
+- [x] Admin Egress 和 Subscriptions 页面支持查看、筛选和编辑高端标识
+- [x] README、DETAILS、`docs/premium-egress.md`、参数驱动文档和订阅路由文档补充高端出口说明

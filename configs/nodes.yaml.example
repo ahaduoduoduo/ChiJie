@@ -22,6 +22,8 @@ node_pools:
               server: example.com
               port: 1080
               region: HK
+              # 高端节点用于访问开启 Cloudflare 防护、普通节点容易被阻挡的网站。
+              premium: false
               username: REPLACE_WITH_USERNAME
               password: REPLACE_WITH_PASSWORD
 
@@ -31,6 +33,8 @@ node_pools:
         url: https://your-subscription-host/path?token=REPLACE_WITH_TOKEN
         # 留空表示手动刷新；也支持 12h、3d 这类小时/天配置。
         update_interval: 1h
+        # 设置为 true 后，该订阅池下节点默认都是高端节点。
+        premium: false
         # 当某地区只有这个订阅池的一个离线节点时，仍允许请求再尝试一次。
         try_offline: false
         reject_regex:

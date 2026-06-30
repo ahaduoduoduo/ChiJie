@@ -41,6 +41,23 @@ proxy:
   # 可用节点都失败后，是否继续尝试同地区同类型模板节点。
   template_fallback_after_attempts: true
 
+traffic:
+  failure_grouping:
+    enabled: true
+    url_normalization:
+      enabled: true
+      rules:
+        # Admin 请求详情里也可以用可视化编辑器生成同类规则。
+        - name: "hls-signed-query"
+          match:
+            host_pattern: "*.pipecdn.vip"
+            path_pattern: "/ppot/_definst_/*/lvod/*/chunklist.m3u8"
+          query:
+            drop_keys:
+              - vendtime
+              - vhash
+            sort: true
+
 log:
   level: "info"
   file: ""  # 空则输出到 stdout

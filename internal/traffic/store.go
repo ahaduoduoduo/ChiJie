@@ -2,7 +2,6 @@ package traffic
 
 import (
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -19,6 +18,7 @@ type Trace struct {
 	EgressGroup    string    `json:"egress_group,omitempty"`
 	Strategy       string    `json:"strategy,omitempty"`
 	Residential    bool      `json:"residential,omitempty"`
+	Premium        bool      `json:"premium,omitempty"`
 	EgressPool     string    `json:"egress_pool,omitempty"`
 	EgressNode     string    `json:"egress_node,omitempty"`
 	EgressSource   string    `json:"egress_source,omitempty"`
@@ -58,9 +58,10 @@ type Bucket struct {
 
 type DisplayTrace struct {
 	Trace
-	GroupKey   string  `json:"group_key,omitempty"`
-	GroupCount int     `json:"group_count,omitempty"`
-	Children   []Trace `json:"children,omitempty"`
+	GroupKey    string  `json:"group_key,omitempty"`
+	GroupTarget string  `json:"group_target,omitempty"`
+	GroupCount  int     `json:"group_count,omitempty"`
+	Children    []Trace `json:"children,omitempty"`
 }
 
 type Snapshot struct {
@@ -77,6 +78,7 @@ type Store struct {
 	traces        []Trace
 	startedAt     time.Time
 	activeTunnels int64
+	config        Config
 }
 
 func NewStore(capacity int) *Store {
@@ -86,7 +88,20 @@ func NewStore(capacity int) *Store {
 	return &Store{
 		capacity:  capacity,
 		startedAt: time.Now(),
+		config:    DefaultConfig(),
 	}
+}
+
+func (s *Store) UpdateConfig(cfg Config) {
+	s.mu.Lock()
+	s.config = NormalizeConfig(cfg)
+	s.mu.Unlock()
+}
+
+func (s *Store) Config() Config {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return NormalizeConfig(s.config)
 }
 
 func (s *Store) Record(trace Trace) Trace {
@@ -137,8 +152,8 @@ func (s *Store) Snapshot(limit int) Snapshot {
 	return Snapshot{
 		Metrics:       s.metricsLocked(),
 		Traces:        traces,
-		DisplayTraces: displayTraces(traces),
-		Series:        buildSeries(s.traces, time.Now()),
+		DisplayTraces: displayTraces(traces, s.config),
+		Series:        buildSeries(s.traces, time.Now(), s.config),
 	}
 }
 
@@ -158,7 +173,7 @@ func (s *Store) metricsLocked() Metrics {
 		metrics.RawRequests++
 		if isFailure(trace) {
 			metrics.RawFailures++
-			key := failureGroupKey(trace)
+			key := failureGroupKey(trace, s.config)
 			if key != "" {
 				if _, ok := seenFailures[key]; ok {
 					metrics.RequestBytes += trace.RequestBytes
@@ -203,7 +218,7 @@ func (s *Store) metricsLocked() Metrics {
 	return metrics
 }
 
-func displayTraces(traces []Trace) []DisplayTrace {
+func displayTraces(traces []Trace, cfg Config) []DisplayTrace {
 	rows := make([]DisplayTrace, 0, len(traces))
 	indexByKey := make(map[string]int)
 	for _, trace := range traces {
@@ -211,7 +226,7 @@ func displayTraces(traces []Trace) []DisplayTrace {
 			rows = append(rows, DisplayTrace{Trace: trace, GroupCount: 1})
 			continue
 		}
-		key := failureGroupKey(trace)
+		key := failureGroupKey(trace, cfg)
 		if key == "" {
 			rows = append(rows, DisplayTrace{Trace: trace, GroupCount: 1})
 			continue
@@ -223,10 +238,11 @@ func displayTraces(traces []Trace) []DisplayTrace {
 		}
 		indexByKey[key] = len(rows)
 		rows = append(rows, DisplayTrace{
-			Trace:      trace,
-			GroupKey:   key,
-			GroupCount: 1,
-			Children:   []Trace{trace},
+			Trace:       trace,
+			GroupKey:    key,
+			GroupTarget: failureGroupTarget(trace, cfg),
+			GroupCount:  1,
+			Children:    []Trace{trace},
 		})
 	}
 	for i := range rows {
@@ -237,7 +253,7 @@ func displayTraces(traces []Trace) []DisplayTrace {
 	return rows
 }
 
-func buildSeries(traces []Trace, now time.Time) []Bucket {
+func buildSeries(traces []Trace, now time.Time, cfg Config) []Bucket {
 	cutoff := now.Add(-24 * time.Hour).Truncate(time.Minute)
 	buckets := make(map[int64]*Bucket)
 	latencies := make(map[int64][]int64)
@@ -257,7 +273,7 @@ func buildSeries(traces []Trace, now time.Time) []Bucket {
 		}
 
 		if isFailure(trace) {
-			groupKey := failureGroupKey(trace)
+			groupKey := failureGroupKey(trace, cfg)
 			if groupKey != "" {
 				if _, ok := seenFailures[groupKey]; ok {
 					continue
@@ -297,41 +313,6 @@ func buildSeries(traces []Trace, now time.Time) []Bucket {
 
 func isFailure(trace Trace) bool {
 	return trace.Status == 0 || trace.Status >= 400 || trace.Error != ""
-}
-
-func failureGroupKey(trace Trace) string {
-	target := strings.TrimSpace(trace.URL)
-	if target == "" {
-		target = strings.TrimSpace(trace.Target)
-	}
-	if target == "" {
-		return ""
-	}
-	return strings.Join([]string{
-		nonEmpty(trace.Kind, "proxy"),
-		target,
-		targetArea(trace),
-	}, "\x00")
-}
-
-func targetArea(trace Trace) string {
-	if trace.EgressGroup != "" {
-		return trace.EgressGroup
-	}
-	if trace.Region != "" {
-		if trace.Residential && !strings.HasSuffix(trace.Region, "-RES") {
-			return trace.Region + "-RES"
-		}
-		return trace.Region
-	}
-	return "DIRECT"
-}
-
-func nonEmpty(value, fallback string) string {
-	if strings.TrimSpace(value) == "" {
-		return fallback
-	}
-	return value
 }
 
 func percentile95(sorted []int64) int64 {

@@ -1,6 +1,10 @@
 // Egress — region groups + node table
 const { Modal, Drawer, Toggle, Seg, RegionPill, StatusDot, LatencyBar, useToast } = window.UI;
 
+function nodeGroupCode(node) {
+  return window.PG.egressGroupCode(node.region, node.residential, node.premium);
+}
+
 function PageEgress({ state, dispatch }) {
   const { pools, regionGroups } = state;
   const [filter, setFilter] = React.useState("all");
@@ -15,10 +19,11 @@ function PageEgress({ state, dispatch }) {
   const allNodes = realPools.flatMap(p => (p.nodes || []).map(n => ({ ...n, pool: p.name, poolSource: p.source })));
 
   const filtered = allNodes.filter(n => {
-    if (filter === "normal" && n.residential) return false;
+    if (filter === "normal" && (n.residential || n.premium)) return false;
     if (filter === "residential" && !n.residential) return false;
+    if (filter === "premium" && !n.premium) return false;
     if (groupFilter) {
-      const g = n.residential ? `${n.region}-RES` : n.region;
+      const g = nodeGroupCode(n);
       if (g !== groupFilter) return false;
     }
     if (search) {
@@ -29,8 +34,9 @@ function PageEgress({ state, dispatch }) {
   });
 
   const visibleGroups = regionGroups.filter(g => {
-    if (filter === "normal" && g.residential) return false;
+    if (filter === "normal" && (g.residential || g.premium)) return false;
     if (filter === "residential" && !g.residential) return false;
+    if (filter === "premium" && !g.premium) return false;
     return true;
   });
 
@@ -46,6 +52,7 @@ function PageEgress({ state, dispatch }) {
             {value:"all", label:"All"},
             {value:"normal", label:"Normal"},
             {value:"residential", label:"Residential"},
+            {value:"premium", label:"Premium"},
           ]}/>
           <button className="btn" onClick={() => dispatch({type:"refreshData"})}><Ic.refresh/> Refresh status</button>
           <button className="btn primary" onClick={() => setAddOpen(true)}><Ic.plus/> Add node</button>
@@ -74,7 +81,7 @@ function PageEgress({ state, dispatch }) {
                   position:"relative",
                 }}>
                 <div className="row" style={{justifyContent:"space-between"}}>
-                  <RegionPill code={g.code} residential={g.residential}/>
+                  <RegionPill code={g.code} residential={g.residential} premium={g.premium}/>
                   {g.templateBackup && <span style={{fontSize:10, color:"var(--fg-3)"}} className="mono">tpl</span>}
                 </div>
                 <div style={{marginTop:14, fontSize:22, fontWeight:400, letterSpacing:"-0.02em", fontFamily:"'JetBrains Mono', monospace", lineHeight:1}}>
@@ -128,7 +135,7 @@ function PageEgress({ state, dispatch }) {
                   <div className="mono" style={{fontSize:12}}>{n.pool}</div>
                   <div className="muted-2" style={{fontSize:10.5, marginTop:2}}>{n.poolSource}</div>
                 </td>
-                <td><RegionPill code={n.residential ? `${n.region}-RES` : n.region} residential={n.residential}/></td>
+                <td><RegionPill code={nodeGroupCode(n)} residential={n.residential} premium={n.premium}/></td>
                 <td className="mono muted">{n.type}</td>
                 <td><LatencyBar ms={n.latency}/></td>
                 <td><StatusDot alive={n.alive} enabled={n.enabled} fail={n.fail_count}/></td>
@@ -153,9 +160,10 @@ function PageEgress({ state, dispatch }) {
         {drawerNode && (
           <>
             <div className="row" style={{gap:8, marginBottom:24, flexWrap:"wrap"}}>
-              <RegionPill code={drawerNode.residential ? `${drawerNode.region}-RES` : drawerNode.region} residential={drawerNode.residential}/>
+              <RegionPill code={nodeGroupCode(drawerNode)} residential={drawerNode.residential} premium={drawerNode.premium}/>
               <StatusDot alive={drawerNode.alive} enabled={drawerNode.enabled} fail={drawerNode.fail_count}/>
               <span className="pill mono">{drawerNode.type}</span>
+              {drawerNode.premium && <span className="pill premium mono">premium</span>}
               {drawerNode.tags?.map(t => <span key={t} className="pill tag">{t}</span>)}
             </div>
             <div className="kv" style={{rowGap:14}}>
@@ -165,6 +173,7 @@ function PageEgress({ state, dispatch }) {
               <div className="k">Port</div><div className="v mono">{drawerNode.port || "—"}</div>
               <div className="k">Region</div><div className="v mono">{drawerNode.region}</div>
               <div className="k">Residential</div><div className="v">{drawerNode.residential ? "yes" : "no"}</div>
+              <div className="k">Premium</div><div className="v">{drawerNode.premium ? "yes" : "no"}</div>
               <div className="k">Enabled</div><div className="v"><Toggle on={drawerNode.enabled} onChange={() => { dispatch({type:"toggleNode", id:drawerNode.id}); setDrawerNode({...drawerNode, enabled: !drawerNode.enabled}); }}/></div>
               <div className="k">Last latency</div><div className="v"><LatencyBar ms={drawerNode.latency}/></div>
               <div className="k">Fail count</div><div className="v mono">{drawerNode.fail_count}</div>
@@ -206,7 +215,7 @@ function AddStaticModal({ open, onClose, pools, dispatch, toast }) {
   const [form, setForm] = React.useState({
     pool: pools[0]?.name || "us-fleet",
     name: "", type: "socks5", server: "", port: 1080,
-    region: "US", residential: false, username: "", password: "", tags: ""
+    region: "US", residential: false, premium: false, username: "", password: "", tags: ""
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   React.useEffect(() => {
@@ -217,7 +226,7 @@ function AddStaticModal({ open, onClose, pools, dispatch, toast }) {
 	    if (!form.pool) { toast("Static pool is required"); return; }
 	    const ok = await dispatch({ type:"addStaticNode", node: {
 	      name: form.name, type: form.type, server: form.server, port: +form.port,
-	      region: form.region.toUpperCase().slice(0,2), residential: form.residential,
+	      region: form.region.toUpperCase().slice(0,2), residential: form.residential, premium: form.premium,
 	      username: form.username,
 	      password: form.password,
 	      enabled: true,
@@ -256,6 +265,10 @@ function AddStaticModal({ open, onClose, pools, dispatch, toast }) {
 	          <div className="field"><label className="field-label">Class</label>
 	            <Toggle on={form.residential} onChange={v => set("residential", v)} label={form.residential ? "Residential" : "Normal"}/></div>
 	        </div>
+	        <div className="field">
+	          <label className="field-label">Premium</label>
+	          <Toggle on={form.premium} onChange={v => set("premium", v)} label={form.premium ? "Premium node" : "Standard node"}/>
+	        </div>
 	        <div className="field-row">
 	          <div className="field"><label className="field-label">Username</label>
 	            <input className="input mono" value={form.username} onChange={e => set("username", e.target.value)} placeholder="optional"/></div>
@@ -270,7 +283,7 @@ function AddStaticModal({ open, onClose, pools, dispatch, toast }) {
 }
 
 function NodeMetadataModal({ node, onClose, dispatch, toast, onSaved }) {
-  const [form, setForm] = React.useState({ name: "", alias: "", region: "", residential: false, tags: "" });
+  const [form, setForm] = React.useState({ name: "", alias: "", region: "", residential: false, premium: false, tags: "" });
   React.useEffect(() => {
     if (!node) return;
     setForm({
@@ -278,6 +291,7 @@ function NodeMetadataModal({ node, onClose, dispatch, toast, onSaved }) {
       alias: node.alias || "",
       region: node.region || "",
       residential: !!node.residential,
+      premium: !!node.premium,
       tags: (node.tags || []).join(", "),
     });
   }, [node]);
@@ -289,6 +303,8 @@ function NodeMetadataModal({ node, onClose, dispatch, toast, onSaved }) {
     const set = new Set(tags().map(t => t.toLowerCase()));
     if (form.residential) set.add("residential");
     if (!form.residential) set.delete("residential");
+    if (form.premium) set.add("premium");
+    if (!form.premium) set.delete("premium");
     return Array.from(set);
   };
   const serverKey = `${node.server || "—"}${node.port ? `:${node.port}` : ""}`;
@@ -304,8 +320,10 @@ function NodeMetadataModal({ node, onClose, dispatch, toast, onSaved }) {
         region,
         alias: form.alias.trim(),
         tags: metadataTags(),
+        residential: !!form.residential,
+        premium: !!form.premium,
       }});
-      if (ok) onSaved({ ...node, region, alias: form.alias.trim(), tags: metadataTags(), residential: !!form.residential });
+      if (ok) onSaved({ ...node, region, alias: form.alias.trim(), tags: metadataTags(), residential: !!form.residential, premium: !!form.premium });
       return;
     }
 
@@ -319,6 +337,7 @@ function NodeMetadataModal({ node, onClose, dispatch, toast, onSaved }) {
       name: nextName,
       region,
       residential: !!form.residential,
+      premium: !!form.premium,
       tags: metadataTags(),
       enabled: node.enabled !== false,
     };
@@ -365,8 +384,12 @@ function NodeMetadataModal({ node, onClose, dispatch, toast, onSaved }) {
           </div>
         </div>
         <div className="field">
+          <label className="field-label">Premium</label>
+          <Toggle on={form.premium} onChange={v => set("premium", v)} label={form.premium ? "Premium node" : "Standard node"} />
+        </div>
+        <div className="field">
           <label className="field-label">Tags</label>
-          <input className="input mono" value={form.tags} onChange={e => set("tags", e.target.value)} placeholder="streaming, residential" />
+          <input className="input mono" value={form.tags} onChange={e => set("tags", e.target.value)} placeholder="streaming, residential, premium" />
           {node.poolSource === "subscription" && <div className="field-hint">Subscription metadata is saved by node name and server key.</div>}
         </div>
       </div>

@@ -30,6 +30,7 @@ type Node struct {
 	Password    string            `yaml:"password" json:"password,omitempty"`
 	Enabled     *bool             `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Residential bool              `yaml:"residential,omitempty" json:"residential,omitempty"`
+	Premium     bool              `yaml:"premium,omitempty" json:"premium,omitempty"`
 	Tags        []string          `yaml:"tags,omitempty" json:"tags,omitempty"`
 	Extra       map[string]string `yaml:"extra" json:"extra,omitempty"` // 协议特定参数
 }

@@ -8,10 +8,11 @@
 - `WS /tunnel`：通过首帧 JSON 声明目标和出口参数，支持 raw TCP 转发和上游 WebSocket 握手转发
 - 出口协议：直连、SOCKS5、HTTP Proxy、Shadowsocks、VMess、VLESS、Trojan、Hysteria2
 - 节点池管理：静态节点、订阅节点、模板节点和直连池
-- 地区组：普通地区组使用 `US` / `HK` / `JP`，家宽地区组使用 `US-RES` / `HK-RES`
+- 地区组：普通地区组使用 `US` / `HK` / `JP`，家宽地区组使用 `US-RES` / `HK-RES`，高端地区组使用 `US-PREM`
 - 出口策略：`random`、`round-robin`、`least-latency`
 - 模板节点：支持 Bright Data 这类按地区动态生成账号的出口，可作为地区兜底或冷门地区动态出口
 - 家宽模板：通过 `residential: true` 单独声明，服务家宽请求；普通请求没有同地区普通出口时可降级使用同地区家宽出口
+- 高端出口：节点或订阅池可配置 `premium: true`，请求带 `egress.premium=true` 时只使用高端节点，适合访问开启 Cloudflare 防护的网站
 - 健康检查：后台探测节点连通性和延迟，供可用性判断和 `least-latency` 使用
 - TLS 指纹：支持内置预设、自定义 JA3、配置文件指纹名称和请求级字符串
 - Admin API：管理节点池、订阅刷新、TLS 指纹、流量日志和系统重载
@@ -116,6 +117,7 @@ Admin 登录限速的客户端 IP 在 Cloudflare 部署下优先读取 `CF-Conne
 外部服务接入 Proxy API 详见 [docs/proxy-client-usage.md](docs/proxy-client-usage.md)。
 参数驱动出口模型详见 [docs/parameter-driven-egress.md](docs/parameter-driven-egress.md)。
 订阅节点地区识别、节点元数据和模板语义详见 [docs/subscription-routing.md](docs/subscription-routing.md)。
+高端出口节点配置和请求语义详见 [docs/premium-egress.md](docs/premium-egress.md)。
 模板 fallback、远端 Chijie 和优先级规则详见 [docs/template-fallback.md](docs/template-fallback.md)。
 Admin 前端接入和构建说明详见 [docs/admin-frontend.md](docs/admin-frontend.md)。
 TLS 指纹配置、`extra_fp` 兼容和测试接口详见 [docs/tls-fingerprints.md](docs/tls-fingerprints.md)。
@@ -163,6 +165,7 @@ Content-Type: application/json
     "region": "US",
     "strategy": "least-latency",
     "residential": false,
+    "premium": false,
     "tls_fingerprint": "chrome"
   }
 }
@@ -184,6 +187,7 @@ Proxy token 是无状态 JWT，只在生成弹窗中显示一次；后台不保�
 - `egress.max_latency_ms`：配合 `egress.any` 使用，限制候选出口最近健康检查延迟上限；`0` 表示不限制。
 - `egress.strategy`：`random`、`round-robin`、`least-latency`，缺省为 `random`。
 - `egress.residential`：是否使用家宽出口。
+- `egress.premium`：是否使用高端出口；未指定 `region` 时会自动选择任意高端非直连出口。
 - `egress.tls_fingerprint`：TLS 指纹名称、预设名、JA3 raw、JA4 raw、Akamai raw 或可解析的配置字符串；测试结果以远端返回的真实指纹信息为准。
 
 响应使用目标服务器的 status code、`Content-Type` 和响应体。目标服务器返回的 `Set-Cookie` 会逐条写入 `/proxy` 响应头；网关不保存 cookie、不自动生成下一次请求的 `Cookie`，也不改写 cookie 的 `Domain` / `Path`。目标服务器返回 3xx 且 `follow_redirects=false` 时，网关保留 3xx 状态并转发 `Location` 响应头。
@@ -194,16 +198,17 @@ Proxy token 是无状态 JWT，只在生成弹窗中显示一次；后台不保�
 
 ### 出口选择
 
-1. `region` 为空且 `any` 不是 `true` 时使用直连出口；如果传入 `tls_fingerprint`，仍应用 TLS 指纹。
-2. `any=true` 或 `region` 为 `*`、`ANY`、`AUTO` 时，选择任意非直连静态/订阅出口；设置 `max_latency_ms` 后只选择延迟不超过阈值的节点。
+1. `region` 为空、`any` 不是 `true` 且 `premium` 不是 `true` 时使用直连出口；如果传入 `tls_fingerprint`，仍应用 TLS 指纹。
+2. `any=true`、`premium=true` 或 `region` 为 `*`、`ANY`、`AUTO` 时，选择任意非直连静态/订阅出口；设置 `max_latency_ms` 后只选择延迟不超过阈值的节点。
 3. `region` 不为空时标准化为大写二字母地区码。
 4. `residential=false` 查找普通地区组，例如 `US`。
 5. `residential=true` 查找家宽地区组，例如 `US-RES`。
-6. 地区组内存在可用静态节点或订阅节点时，按 `strategy` 选择节点。
-7. 订阅池开启 `try_offline` 且某地区只有一个离线订阅节点时，在模板 fallback 前允许该节点再尝试一次。
-8. 每个出口访问目标站点时使用 `proxy.response_header_timeout` 控制等待响应头的超时，默认 `3s`；使用 `proxy.total_timeout` 控制完整请求总时长，默认 `30s`；`follow_redirects=true` 时最多跟随 `proxy.max_redirects` 次 redirect，默认 5 次；开启 `proxy.template_fallback_after_attempts` 时，地区组内可用节点连续失败达到 `proxy.max_attempts` 后继续尝试同类型模板节点；地区组内没有可用节点时也会直接使用同类型模板节点。
-9. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板。
-10. 没有可用节点也没有可用模板时返回错误。
+6. `premium=true` 时只查找高端地区组，例如 `US-PREM` 或 `US-RES-PREM`。
+7. 地区组内存在可用静态节点或订阅节点时，按 `strategy` 选择节点。
+8. 订阅池开启 `try_offline` 且某地区只有一个离线订阅节点时，在模板 fallback 前允许该节点再尝试一次。
+9. 每个出口访问目标站点时使用 `proxy.response_header_timeout` 控制等待响应头的超时，默认 `3s`；使用 `proxy.total_timeout` 控制完整请求总时长，默认 `30s`；`follow_redirects=true` 时最多跟随 `proxy.max_redirects` 次 redirect，默认 5 次；开启 `proxy.template_fallback_after_attempts` 时，地区组内可用节点连续失败达到 `proxy.max_attempts` 后继续尝试同类型模板节点；地区组内没有可用节点时也会直接使用同类型模板节点。
+10. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板；高端请求只在高端集合内降级。
+11. 没有可用节点也没有可用模板时返回错误。
 
 任意地区出口不会使用 `direct`、`type: direct` 静态节点或模板节点，因为模板节点需要明确地区码来生成代理账号。
 
@@ -227,6 +232,7 @@ WS /tunnel
     "region": "US",
     "strategy": "round-robin",
     "residential": false,
+    "premium": false,
     "tls_fingerprint": "chrome"
   }
 }
@@ -288,8 +294,29 @@ Proxy API 调用 token 由后台生成，使用同一个 `jwt_secret` 签名，�
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | GET | /api/traffic?limit=100 | 查看请求记录、合并展示记录、分钟级流量序列和聚合指标；内存最多保留最近 1000 条 |
+| POST | /api/traffic/grouping-rules | 保存失败 URL 规范化规则，并立即用于 Traffic 合并展示 |
 
 Traffic 指标使用有效请求口径：成功请求逐条计入；失败请求按 `kind + url/target + egress_group` 合并计入，避免同一个目标故障被调用方重复重试后放大错误率。延迟指标只统计最终成功的请求；原始请求数仍通过 `raw_requests` / `raw_failures` 返回给 Admin 页面展示。
+
+失败请求的 URL 可按规则先做规范化再参与合并。Admin 请求详情里的 `Ignore URL params` 可从真实错误 URL 生成规则：Host 和 Path 每一段可点击切换为 `*`，Query 参数可勾选加入 `drop_keys`。规则会保存到 `gateway.yaml`，完整说明见 [docs/traffic-url-grouping.md](docs/traffic-url-grouping.md)：
+
+```yaml
+traffic:
+  failure_grouping:
+    enabled: true
+    url_normalization:
+      enabled: true
+      rules:
+        - name: "hls-signed-query"
+          match:
+            host_pattern: "*.pipecdn.vip"
+            path_pattern: "/ppot/_definst_/*/lvod/*/chunklist.m3u8"
+          query:
+            drop_keys:
+              - vendtime
+              - vhash
+            sort: true
+```
 
 #### 指纹管理
 

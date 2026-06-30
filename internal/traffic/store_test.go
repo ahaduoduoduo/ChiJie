@@ -1,6 +1,7 @@
 package traffic
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -148,5 +149,64 @@ func TestStoreCoalescesRepeatedFailuresAndUsesSuccessfulLatency(t *testing.T) {
 	}
 	if usGroup.GroupCount != 2 || len(usGroup.Children) != 2 {
 		t.Fatalf("merged group: count=%d children=%d want 2/2", usGroup.GroupCount, len(usGroup.Children))
+	}
+}
+
+func TestStoreCoalescesFailuresWithDroppedQueryKeys(t *testing.T) {
+	store := NewStore(10)
+	cfg, _, err := MergeURLNormalizationRule(DefaultConfig(), URLNormalizationRule{
+		Name: "pipecdn-hls",
+		Match: URLNormalizationMatch{
+			HostPattern: "*.pipecdn.vip",
+			PathPattern: "/ppot/_definst_/*/lvod/*/chunklist.m3u8",
+		},
+		Query: QueryNormalizationConfig{
+			DropKeys: []string{"vendtime", "vhash"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("merge url rule: %v", err)
+	}
+	store.UpdateConfig(cfg)
+
+	urls := []string{
+		"https://sss1-e1.pipecdn.vip/ppot/_definst_/mp4:s1/lvod/dh-mhls-004.mp4/chunklist.m3u8?vendtime=1783028409&vhash=a&vCustomParameter=129830060_0.0.0.0_CA_0_0_1&lb=2b40938d7e90c31fb2c8b7ddbac46425",
+		"https://sss1-e1.pipecdn.vip/ppot/_definst_/mp4:s1/lvod/dh-mhls-004.mp4/chunklist.m3u8?vendtime=1783028401&vhash=b&vCustomParameter=129830060_0.0.0.0_CA_0_0_1&lb=2b40938d7e90c31fb2c8b7ddbac46425",
+		"https://sss1-e1.pipecdn.vip/ppot/_definst_/mp4:s1/lvod/dh-mhls-004.mp4/chunklist.m3u8?vendtime=1783028394&vhash=c&vCustomParameter=129830060_0.0.0.0_CA_0_0_1&lb=2b40938d7e90c31fb2c8b7ddbac46425",
+		"https://sss1-e1.pipecdn.vip/ppot/_definst_/mp4:s1/lvod/dh-mhls-004.mp4/chunklist.m3u8?vendtime=1783028394&vhash=c&vCustomParameter=129830060_0.0.0.0_CA_0_0_1&lb=different",
+	}
+	for _, rawURL := range urls {
+		store.Record(Trace{
+			Kind:        "proxy",
+			Method:      "GET",
+			URL:         rawURL,
+			EgressGroup: "CA",
+			Status:      502,
+			Error:       "bad gateway",
+		})
+	}
+
+	snapshot := store.Snapshot(10)
+	if snapshot.Metrics.RawFailures != 4 || snapshot.Metrics.Failures != 2 {
+		t.Fatalf("failures: raw=%d effective=%d want 4/2", snapshot.Metrics.RawFailures, snapshot.Metrics.Failures)
+	}
+	if len(snapshot.DisplayTraces) != 2 {
+		t.Fatalf("display traces = %d want 2", len(snapshot.DisplayTraces))
+	}
+	var merged *DisplayTrace
+	for i := range snapshot.DisplayTraces {
+		if snapshot.DisplayTraces[i].GroupCount == 3 {
+			merged = &snapshot.DisplayTraces[i]
+			break
+		}
+	}
+	if merged == nil {
+		t.Fatalf("expected three matching HLS failures to merge")
+	}
+	if strings.Contains(merged.GroupTarget, "vendtime=") || strings.Contains(merged.GroupTarget, "vhash=") {
+		t.Fatalf("group target should drop volatile query keys: %s", merged.GroupTarget)
+	}
+	if !strings.Contains(merged.GroupTarget, "lb=2b40938d7e90c31fb2c8b7ddbac46425") {
+		t.Fatalf("group target should preserve stable query keys: %s", merged.GroupTarget)
 	}
 }

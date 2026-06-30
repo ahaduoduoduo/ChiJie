@@ -25,6 +25,13 @@ proxy:
   max_redirects: 5
   template_fallback_after_attempts: true
 
+traffic:
+  failure_grouping:
+    enabled: true
+    url_normalization:
+      enabled: true
+      rules: []
+
 log:
   level: "info"
   file: ""

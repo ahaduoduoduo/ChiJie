@@ -415,6 +415,85 @@ func TestResolveEgressEmptyRegionUsesDirect(t *testing.T) {
 	}
 }
 
+func TestResolveEgressPremiumWithoutRegionUsesPremiumNode(t *testing.T) {
+	dir := t.TempDir()
+	nodesPath := filepath.Join(dir, "nodes.yaml")
+	data := []byte(`
+node_pools:
+  primary:
+    source: static
+    nodes:
+      - name: us-normal
+        type: socks5
+        server: 127.0.0.1
+        port: 1080
+        region: US
+      - name: hk-premium
+        type: socks5
+        server: 127.0.0.1
+        port: 1081
+        region: HK
+        premium: true
+`)
+	if err := os.WriteFile(nodesPath, data, 0644); err != nil {
+		t.Fatalf("write nodes: %v", err)
+	}
+
+	manager := pool.NewManager()
+	if err := manager.LoadFromFile(nodesPath); err != nil {
+		t.Fatalf("load nodes: %v", err)
+	}
+
+	s := &Server{poolManager: manager}
+	route, err := s.resolveEgress(EgressOptions{Premium: true, Strategy: "least-latency"})
+	if err != nil {
+		t.Fatalf("resolve premium egress: %v", err)
+	}
+	if route.Direct || route.Group != "ANY-PREM" || !route.Premium || route.Choice == nil || route.Choice.NodeName != "hk-premium" {
+		t.Fatalf("unexpected premium route: %#v", route)
+	}
+}
+
+func TestResolveEgressPremiumWithoutRegionFallsBackToPremiumResidential(t *testing.T) {
+	dir := t.TempDir()
+	nodesPath := filepath.Join(dir, "nodes.yaml")
+	data := []byte(`
+node_pools:
+  primary:
+    source: static
+    nodes:
+      - name: us-normal
+        type: socks5
+        server: 127.0.0.1
+        port: 1080
+        region: US
+      - name: us-premium-res
+        type: socks5
+        server: 127.0.0.1
+        port: 1081
+        region: US
+        residential: true
+        premium: true
+`)
+	if err := os.WriteFile(nodesPath, data, 0644); err != nil {
+		t.Fatalf("write nodes: %v", err)
+	}
+
+	manager := pool.NewManager()
+	if err := manager.LoadFromFile(nodesPath); err != nil {
+		t.Fatalf("load nodes: %v", err)
+	}
+
+	s := &Server{poolManager: manager}
+	route, err := s.resolveEgress(EgressOptions{Premium: true, Strategy: "least-latency"})
+	if err != nil {
+		t.Fatalf("resolve premium residential fallback egress: %v", err)
+	}
+	if route.Group != "ANY-RES-PREM" || !route.Premium || !route.Residential || route.Choice == nil || route.Choice.NodeName != "us-premium-res" {
+		t.Fatalf("unexpected premium residential fallback route: %#v", route)
+	}
+}
+
 func TestResolveEgressUsesResidentialFallbackRoute(t *testing.T) {
 	dir := t.TempDir()
 	nodesPath := filepath.Join(dir, "nodes.yaml")

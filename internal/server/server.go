@@ -207,6 +207,7 @@ type EgressOptions struct {
 	Region         string `json:"region"`
 	Strategy       string `json:"strategy"`
 	Residential    bool   `json:"residential"`
+	Premium        bool   `json:"premium"`
 	TLSFingerprint string `json:"tls_fingerprint"`
 	Any            bool   `json:"any"`
 	MaxLatencyMS   int    `json:"max_latency_ms"`
@@ -219,6 +220,7 @@ type egressRoute struct {
 	Group          string
 	Strategy       string
 	Residential    bool
+	Premium        bool
 	TLSFingerprint string
 	MaxLatencyMS   int
 	Choice         *pool.EgressChoice
@@ -440,8 +442,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	util.Debugf("[egress] %s %s → group:%s strategy:%s residential:%t",
-		req.Method, req.URL, route.Group, route.Strategy, route.Residential)
+	util.Debugf("[egress] %s %s → group:%s strategy:%s residential:%t premium:%t",
+		req.Method, req.URL, route.Group, route.Strategy, route.Residential, route.Premium)
 
 	proxyResp, finalRoute, err := s.doProxyWithRetry(r.Context(), &req, route)
 	if err != nil {
@@ -511,6 +513,7 @@ func applyRouteTrace(trace *traffic.Trace, route *egressRoute) {
 	trace.Region = route.Region
 	trace.Strategy = route.Strategy
 	trace.Residential = route.Residential
+	trace.Premium = route.Premium
 	trace.TLSFingerprint = route.TLSFingerprint
 	if route.Choice != nil {
 		trace.EgressPool = route.Choice.PoolName
@@ -614,6 +617,7 @@ func proxyAttemptRoutes(route *egressRoute, settings ProxySettings) []*egressRou
 		attemptRoute.Region = choice.Region
 		attemptRoute.Group = choice.Group
 		attemptRoute.Residential = choice.Residential
+		attemptRoute.Premium = choice.Premium
 		routes = append(routes, &attemptRoute)
 	}
 	return routes
@@ -772,6 +776,7 @@ func (s *Server) doRemoteChijieProxy(ctx context.Context, req *ProxyRequest, rou
 		forwardReq.Egress.Strategy = route.Strategy
 	}
 	forwardReq.Egress.Residential = route.Residential || (route.Choice != nil && route.Choice.Residential)
+	forwardReq.Egress.Premium = route.Premium || (route.Choice != nil && route.Choice.Premium)
 	if route.TLSFingerprint != "" {
 		forwardReq.Egress.TLSFingerprint = route.TLSFingerprint
 	}
@@ -893,6 +898,7 @@ func (s *Server) validateTargetURL(ctx context.Context, rawURL string) error {
 
 func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 	strategy := pool.NormalizeStrategy(options.Strategy)
+	selector := pool.EgressSelector{Residential: options.Residential, Premium: options.Premium}
 	fingerprintValue := strings.TrimSpace(options.TLSFingerprint)
 	region := strings.TrimSpace(options.Region)
 	maxLatencyMS := options.MaxLatencyMS
@@ -901,8 +907,8 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 	}
 
 	if region == "" {
-		if options.Any {
-			choices, err := s.poolManager.SelectAnyEgressCandidates(strategy, options.Residential, time.Duration(maxLatencyMS)*time.Millisecond)
+		if options.Any || options.Premium {
+			choices, routeSelector, err := s.selectAnyEgressCandidates(strategy, selector, time.Duration(maxLatencyMS)*time.Millisecond)
 			if err != nil {
 				return nil, err
 			}
@@ -910,9 +916,10 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 			return &egressRoute{
 				Any:            true,
 				Region:         choice.Region,
-				Group:          pool.AnyEgressGroup(options.Residential),
+				Group:          pool.AnyEgressGroupFor(routeSelector),
 				Strategy:       strategy,
-				Residential:    options.Residential,
+				Residential:    routeSelector.Residential,
+				Premium:        routeSelector.Premium,
 				TLSFingerprint: fingerprintValue,
 				MaxLatencyMS:   maxLatencyMS,
 				Choice:         choice,
@@ -928,7 +935,7 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 	}
 
 	if isAnyRegion(region) {
-		choices, err := s.poolManager.SelectAnyEgressCandidates(strategy, options.Residential, time.Duration(maxLatencyMS)*time.Millisecond)
+		choices, routeSelector, err := s.selectAnyEgressCandidates(strategy, selector, time.Duration(maxLatencyMS)*time.Millisecond)
 		if err != nil {
 			return nil, err
 		}
@@ -936,9 +943,10 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 		return &egressRoute{
 			Any:            true,
 			Region:         choice.Region,
-			Group:          pool.AnyEgressGroup(options.Residential),
+			Group:          pool.AnyEgressGroupFor(routeSelector),
 			Strategy:       strategy,
-			Residential:    options.Residential,
+			Residential:    routeSelector.Residential,
+			Premium:        routeSelector.Premium,
 			TLSFingerprint: fingerprintValue,
 			MaxLatencyMS:   maxLatencyMS,
 			Choice:         choice,
@@ -955,18 +963,19 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 	var choices []*pool.EgressChoice
 	var err error
 	if settings.TemplateFallbackAfterAttempts {
-		choices, err = s.poolManager.SelectEgressCandidatesWithTemplateFallback(region, strategy, options.Residential)
+		choices, err = s.poolManager.SelectEgressCandidatesWithTemplateFallbackFor(region, strategy, selector)
 	} else {
-		choices, err = s.poolManager.SelectEgressCandidates(region, strategy, options.Residential)
+		choices, err = s.poolManager.SelectEgressCandidatesFor(region, strategy, selector)
 	}
 	if err != nil {
 		return nil, err
 	}
 	choice := choices[0]
 	routeResidential := choice.Residential
+	routePremium := choice.Premium
 	routeGroup := choice.Group
 	if routeGroup == "" {
-		routeGroup = pool.EgressGroup(region, routeResidential)
+		routeGroup = pool.EgressGroupFor(region, pool.EgressSelector{Residential: routeResidential, Premium: routePremium})
 	}
 
 	return &egressRoute{
@@ -974,10 +983,26 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 		Group:          routeGroup,
 		Strategy:       strategy,
 		Residential:    routeResidential,
+		Premium:        routePremium,
 		TLSFingerprint: fingerprintValue,
 		Choice:         choice,
 		Choices:        choices,
 	}, nil
+}
+
+func (s *Server) selectAnyEgressCandidates(strategy string, selector pool.EgressSelector, maxLatency time.Duration) ([]*pool.EgressChoice, pool.EgressSelector, error) {
+	choices, err := s.poolManager.SelectAnyEgressCandidatesFor(strategy, selector, maxLatency)
+	if err == nil {
+		return choices, selector, nil
+	}
+	if selector.Premium && !selector.Residential {
+		fallback := selector
+		fallback.Residential = true
+		if fallbackChoices, fallbackErr := s.poolManager.SelectAnyEgressCandidatesFor(strategy, fallback, maxLatency); fallbackErr == nil {
+			return fallbackChoices, fallback, nil
+		}
+	}
+	return nil, selector, err
 }
 
 func isAnyRegion(region string) bool {

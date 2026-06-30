@@ -1,6 +1,10 @@
 // Subscriptions
 const { Modal, Drawer, Toggle, Seg, RegionPill, useToast } = window.UI;
 
+function subscriptionNodeGroup(node) {
+  return window.PG.egressGroupCode(node.region, node.residential, node.premium);
+}
+
 function PageSubscriptions({ state, dispatch }) {
   const { pools } = state;
   const subs = pools.filter(p => p.source === "subscription");
@@ -26,7 +30,7 @@ function PageSubscriptions({ state, dispatch }) {
         {subs.map(s => {
           const total = s.nodes.length;
           const online = s.nodes.filter(n => n.alive && n.enabled).length;
-          const regions = Array.from(new Set(s.nodes.map(n => n.region))).filter(Boolean);
+          const groups = Array.from(new Set(s.nodes.map(subscriptionNodeGroup))).filter(Boolean);
           const expanded = !!expandedNodes[s.name];
           const visibleNodes = expanded ? s.nodes : s.nodes.slice(0, 14);
           const errorSummary = subscriptionErrorSummary(s.last_error);
@@ -36,6 +40,7 @@ function PageSubscriptions({ state, dispatch }) {
                 <div className="row gap-12 subscription-title">
                   <h3 className="mono">{s.name}</h3>
                   {s.residential && <span className="pill res">residential</span>}
+                  {s.premium && <span className="pill premium mono">premium</span>}
                   {s.try_offline && <span className="pill mono">try offline</span>}
                 </div>
                 <div className="right subscription-actions">
@@ -68,7 +73,10 @@ function PageSubscriptions({ state, dispatch }) {
                 <div className="subscription-summary-item">
                   <div className="subscription-section-label">Region groups</div>
                   <div className="row" style={{gap:4, flexWrap:"wrap", marginTop:10}}>
-                    {regions.map(r => <RegionPill key={r} code={r}/>)}
+                    {groups.map(code => {
+                      const node = s.nodes.find(n => subscriptionNodeGroup(n) === code) || {};
+                      return <RegionPill key={code} code={code} residential={node.residential} premium={node.premium}/>;
+                    })}
                   </div>
                 </div>
                 <div className="subscription-summary-item">
@@ -179,6 +187,7 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
     url: pool.url || "",
     update_interval: pool.update_interval == null ? "1h" : pool.update_interval,
     residential: !!pool.residential,
+    premium: !!pool.premium,
     try_offline: !!pool.try_offline,
   });
   const regionsFromNodes = (nodes) => Object.fromEntries((nodes || []).map(n => [n.name, n.region || ""]));
@@ -234,6 +243,8 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
             <div className="field"><label className="field-label">Class</label>
               <Toggle on={source.residential} onChange={v => setSourceField("residential", v)} label="Residential pool"/></div>
           </div>
+          <div className="field"><label className="field-label">Premium</label>
+            <Toggle on={source.premium} onChange={v => setSourceField("premium", v)} label="Premium pool"/></div>
           <div className="field"><label className="field-label">Fallback</label>
             <Toggle on={source.try_offline} onChange={v => setSourceField("try_offline", v)} label="Try offline singleton"/></div>
           <div className="row gap-12" style={{marginTop:4, flexWrap:"wrap"}}>
@@ -245,6 +256,7 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
                 url: source.url.trim(),
                 update_interval: source.update_interval.trim(),
                 residential: source.residential,
+                premium: source.premium,
                 try_offline: source.try_offline,
               }, newName: nextName});
               if (ok) onClose();
@@ -300,11 +312,11 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
       )}
       {tab === "tags" && (
         <div className="col gap-12">
-          <div className="field-hint">Manually tag nodes — including the special <span className="mono">residential</span> tag.</div>
+          <div className="field-hint">Manually tag nodes — including special <span className="mono">residential</span> and <span className="mono">premium</span> tags.</div>
           {sub.nodes.slice(0, 12).map(n => (
             <div key={n.id} className="row gap-12">
               <div className="mono truncate" style={{flex:1, fontSize:11.5}}>{n.name}</div>
-              <input className="input mono" value={tagDraft[n.name] || ""} onChange={e => setTagDraft(v => ({...v, [n.name]: e.target.value}))} placeholder="streaming, residential" style={{width:200}}/>
+              <input className="input mono" value={tagDraft[n.name] || ""} onChange={e => setTagDraft(v => ({...v, [n.name]: e.target.value}))} placeholder="streaming, residential, premium" style={{width:200}}/>
             </div>
           ))}
           <button className="btn primary" style={{alignSelf:"flex-start"}} onClick={async () => {
@@ -340,6 +352,7 @@ function AddSubscriptionModal({ open, onClose, dispatch, toast }) {
     url: "",
     update_interval: "1h",
     residential: false,
+    premium: false,
     try_offline: false,
     reject_regex: "",
   });
@@ -352,6 +365,7 @@ function AddSubscriptionModal({ open, onClose, dispatch, toast }) {
       url: form.url.trim(),
       update_interval: form.update_interval,
       residential: form.residential,
+      premium: form.premium,
       try_offline: form.try_offline,
       reject_regex: form.reject_regex.split("\n").map(s => s.trim()).filter(Boolean),
     }});
@@ -374,6 +388,8 @@ function AddSubscriptionModal({ open, onClose, dispatch, toast }) {
           <div className="field"><label className="field-label">Class</label>
             <Toggle on={form.residential} onChange={v => set("residential", v)} label="Residential pool"/></div>
         </div>
+        <div className="field"><label className="field-label">Premium</label>
+          <Toggle on={form.premium} onChange={v => set("premium", v)} label="Premium pool"/></div>
         <div className="field"><label className="field-label">Fallback</label>
           <Toggle on={form.try_offline} onChange={v => set("try_offline", v)} label="Try offline singleton"/></div>
         <div className="field"><label className="field-label">Reject regex (one per line)</label>

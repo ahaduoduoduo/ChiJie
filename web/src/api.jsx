@@ -143,6 +143,7 @@
       config: cfg,
       enabled: boolDefault(cfg.enabled, true),
       residential: !!cfg.residential,
+      premium: !!cfg.premium,
       url: cfg.url || "",
       update_interval: cfg.update_interval || "",
       try_offline: !!cfg.try_offline,
@@ -178,8 +179,9 @@
       alive: node.alive !== false,
       latency: parseDurationMS(node.latency),
       fail_count: node.fail_count || 0,
-      region: node.region || (node.region_group || "").replace(/-RES$/, "") || "",
+      region: node.region || baseRegionFromGroup(node.region_group) || "",
       residential: !!node.residential,
+      premium: !!node.premium,
       tags: node.tags || [],
     };
   }
@@ -227,8 +229,20 @@
     }));
   }
 
+  function traceGroupFromFlags(trace) {
+    if (!trace.region) return "DIRECT";
+    let group = trace.region || "UN";
+    if (trace.residential) group += "-RES";
+    if (trace.premium) group += "-PREM";
+    return group;
+  }
+
+  function baseRegionFromGroup(group) {
+    return String(group || "").replace(/-(RES|PREM)/g, "");
+  }
+
   function normalizeTrace(trace) {
-    const group = trace.egress_group || (trace.residential ? `${trace.region || "UN"}-RES` : trace.region || "DIRECT");
+    const group = trace.egress_group || traceGroupFromFlags(trace);
     const url = trace.url || trace.target || "";
     return {
       id: trace.id,
@@ -236,10 +250,11 @@
       type: trace.kind === "tunnel" ? "tunnel" : "http",
       method: trace.method || (trace.kind === "tunnel" ? "WS" : "GET"),
       url,
-      region: trace.region || group.replace(/-RES$/, ""),
+      region: trace.region || baseRegionFromGroup(group),
       group,
       strategy: trace.strategy || "random",
       residential: !!trace.residential,
+      premium: !!trace.premium,
       pool: trace.egress_pool || "direct",
       node: trace.egress_node || trace.target || "direct",
       template: !!trace.egress_template,
@@ -249,6 +264,7 @@
       bytes: Number(trace.request_bytes || 0) + Number(trace.response_bytes || 0),
       error: trace.error || "",
       group_key: trace.group_key || "",
+      group_target: trace.group_target || "",
       group_count: Number(trace.group_count || 1),
       children: (trace.children || []).map(normalizeTrace),
     };
@@ -301,6 +317,7 @@
       port: Number(node.port || 0),
       region: String(node.region || "").trim().toUpperCase(),
       residential: !!node.residential,
+      premium: !!node.premium,
       tags: node.tags || [],
     };
     if (node.username) out.username = node.username;
@@ -387,6 +404,10 @@
       body: { pool, node, updated_node: cleanNode(updatedNode) },
     }),
     getTraffic: (limit = 200) => request(`/api/traffic?limit=${limit}`).then(normalizeTraffic),
+    addTrafficGroupingRule: (rule) => request("/api/traffic/grouping-rules", {
+      method: "POST",
+      body: rule,
+    }),
     addFingerprint: ({ name, config, configText }) => request("/api/fingerprints", {
       method: "POST",
       body: { name, config, config_text: configText },

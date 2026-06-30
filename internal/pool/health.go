@@ -73,6 +73,7 @@ type TemplateTestResult struct {
 	connectivityCommon
 	Region           string        `json:"region"`
 	Residential      bool          `json:"residential"`
+	Premium          bool          `json:"premium,omitempty"`
 	TemplateType     string        `json:"template_type,omitempty"`
 	Enabled          bool          `json:"enabled"`
 	Latency          time.Duration `json:"-"`
@@ -768,10 +769,12 @@ func (m *Manager) TestTemplateConnectivity(poolName, region, testURL string, tim
 
 	nodeName := fmt.Sprintf("%s-%s", poolName, strings.ToLower(region))
 	entry := &NodeEntry{
-		Node:    &dialer.Node{Name: nodeName, Type: cfg.Type, Server: cfg.Server, Port: cfg.Port},
-		Dialer:  d,
-		Enabled: true,
-		Alive:   true,
+		Node:        &dialer.Node{Name: nodeName, Type: cfg.Type, Server: cfg.Server, Port: cfg.Port, Residential: cfg.Residential, Premium: cfg.Premium},
+		Dialer:      d,
+		Enabled:     true,
+		Alive:       true,
+		Residential: cfg.Residential,
+		Premium:     cfg.Premium,
 	}
 	probe := probeNodeConnectivity(entry, testURL, timeout)
 	result := &TemplateTestResult{
@@ -786,6 +789,7 @@ func (m *Manager) TestTemplateConnectivity(poolName, region, testURL string, tim
 		},
 		Region:           region,
 		Residential:      cfg.Residential,
+		Premium:          cfg.Premium,
 		TemplateType:     "proxy",
 		Enabled:          enabled,
 		Latency:          probe.Latency,
@@ -835,6 +839,7 @@ func testChijieTemplateConnectivity(poolName, region string, cfg *PoolConfig, en
 			"region":      region,
 			"strategy":    "least-latency",
 			"residential": residential,
+			"premium":     cfg.Premium,
 		},
 	}
 	body, err := json.Marshal(payload)
@@ -862,6 +867,7 @@ func testChijieTemplateConnectivity(poolName, region string, cfg *PoolConfig, en
 		},
 		Region:       region,
 		Residential:  residential,
+		Premium:      cfg.Premium,
 		TemplateType: "chijie",
 		Enabled:      enabled,
 	}

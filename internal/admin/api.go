@@ -160,6 +160,7 @@ func NewServer(listen string, poolManager *pool.Manager, fpManager *fingerprint.
 	mux.HandleFunc("/api/reload", s.authMiddleware(s.handleReload))
 	mux.HandleFunc("/api/stats", s.authMiddleware(s.handleStats))
 	mux.HandleFunc("/api/traffic", s.authMiddleware(s.handleTraffic))
+	mux.HandleFunc("/api/traffic/grouping-rules", s.authMiddleware(s.handleTrafficGroupingRules))
 	mux.HandleFunc("/api/system/logging", s.authMiddleware(s.handleLogging))
 	mux.HandleFunc("/api/system/health-check", s.authMiddleware(s.handleHealthCheckSettings))
 	mux.HandleFunc("/api/system/proxy", s.authMiddleware(s.handleProxySettings))
@@ -526,13 +527,15 @@ func (s *Server) handleSubscriptionNodeConfig(w http.ResponseWriter, r *http.Req
 	}
 
 	var req struct {
-		Pool   string   `json:"pool"`
-		Node   string   `json:"node"`
-		Server string   `json:"server"`
-		Port   int      `json:"port"`
-		Region string   `json:"region"`
-		Alias  string   `json:"alias"`
-		Tags   []string `json:"tags"`
+		Pool        string   `json:"pool"`
+		Node        string   `json:"node"`
+		Server      string   `json:"server"`
+		Port        int      `json:"port"`
+		Region      string   `json:"region"`
+		Alias       string   `json:"alias"`
+		Tags        []string `json:"tags"`
+		Residential *bool    `json:"residential"`
+		Premium     *bool    `json:"premium"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -547,6 +550,12 @@ func (s *Server) handleSubscriptionNodeConfig(w http.ResponseWriter, r *http.Req
 	req.Region = strings.ToUpper(strings.TrimSpace(req.Region))
 	req.Alias = strings.TrimSpace(req.Alias)
 	req.Tags = cleanStringSlice(req.Tags)
+	if req.Residential != nil {
+		req.Tags = setSpecialTag(req.Tags, "residential", *req.Residential)
+	}
+	if req.Premium != nil {
+		req.Tags = setSpecialTag(req.Tags, "premium", *req.Premium)
+	}
 	if req.Pool == "" || req.Node == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": "pool and node are required",
@@ -662,12 +671,15 @@ func (s *Server) handleSubscriptionNodeConfig(w http.ResponseWriter, r *http.Req
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"message":    "subscription node metadata updated",
-		"pool":       req.Pool,
-		"node":       req.Node,
-		"region":     req.Region,
-		"alias":      req.Alias,
-		"server_key": serverKey,
+		"message":     "subscription node metadata updated",
+		"pool":        req.Pool,
+		"node":        req.Node,
+		"region":      req.Region,
+		"alias":       req.Alias,
+		"tags":        req.Tags,
+		"residential": util.ContainsString(req.Tags, "residential"),
+		"premium":     util.ContainsString(req.Tags, "premium"),
+		"server_key":  serverKey,
 	})
 }
 
@@ -697,6 +709,29 @@ func cleanStringSlice(values []string) []string {
 		result = append(result, value)
 	}
 	return result
+}
+
+func setSpecialTag(tags []string, tag string, enabled bool) []string {
+	tag = strings.TrimSpace(strings.ToLower(tag))
+	if tag == "" {
+		return tags
+	}
+	result := make([]string, 0, len(tags)+1)
+	found := false
+	for _, value := range tags {
+		if strings.EqualFold(strings.TrimSpace(value), tag) {
+			found = true
+			if enabled {
+				result = append(result, tag)
+			}
+			continue
+		}
+		result = append(result, value)
+	}
+	if enabled && !found {
+		result = append(result, tag)
+	}
+	return cleanStringSlice(result)
 }
 
 // updateNode 更新 static 节点池中的单个节点
@@ -941,6 +976,14 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 			s.proxyRuntime.UpdateProxySettings(settings)
 		}
 	}
+	if s.traffic != nil {
+		trafficCfg, err := s.loadTrafficConfig()
+		if err != nil {
+			errors = append(errors, "traffic: "+err.Error())
+		} else {
+			s.traffic.UpdateConfig(trafficCfg)
+		}
+	}
 
 	if len(errors) > 0 {
 		log.Printf("admin: reload partial failure: %v", errors)
@@ -1179,6 +1222,71 @@ func (s *Server) loadProxySettings() (proxyserver.ProxySettings, error) {
 		return proxyserver.DefaultProxySettings(), err
 	}
 	return proxyserver.ParseProxySettings(cfg.Proxy)
+}
+
+func (s *Server) loadTrafficConfig() (traffic.Config, error) {
+	path := filepath.Join(s.configDir, "gateway.yaml")
+	var cfg struct {
+		Traffic traffic.Config `yaml:"traffic"`
+	}
+	if err := loadYAML(path, &cfg); err != nil {
+		return traffic.DefaultConfig(), err
+	}
+	return traffic.NormalizeConfig(cfg.Traffic), nil
+}
+
+func (s *Server) handleTrafficGroupingRules(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "POST":
+		var req traffic.URLNormalizationRule
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request body"})
+			return
+		}
+		cfg, rule, err := s.persistTrafficGroupingRule(req)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		if s.traffic != nil {
+			s.traffic.UpdateConfig(cfg)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"rule":   rule,
+			"config": cfg,
+		})
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) persistTrafficGroupingRule(rule traffic.URLNormalizationRule) (traffic.Config, traffic.URLNormalizationRule, error) {
+	s.fileMu.Lock()
+	defer s.fileMu.Unlock()
+
+	path := filepath.Join(s.configDir, "gateway.yaml")
+	var raw map[string]any
+	if err := loadYAML(path, &raw); err != nil {
+		return traffic.Config{}, traffic.URLNormalizationRule{}, err
+	}
+	var typed struct {
+		Traffic traffic.Config `yaml:"traffic"`
+	}
+	if err := loadYAML(path, &typed); err != nil {
+		return traffic.Config{}, traffic.URLNormalizationRule{}, err
+	}
+	cfg, storedRule, err := traffic.MergeURLNormalizationRule(typed.Traffic, rule)
+	if err != nil {
+		return traffic.Config{}, traffic.URLNormalizationRule{}, err
+	}
+	if raw == nil {
+		raw = map[string]any{}
+	}
+	raw["traffic"] = cfg
+	if err := atomicWriteYAML(path, raw); err != nil {
+		return traffic.Config{}, traffic.URLNormalizationRule{}, err
+	}
+	return cfg, storedRule, nil
 }
 
 func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {

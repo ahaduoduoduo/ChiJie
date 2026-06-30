@@ -334,6 +334,49 @@ func TestSelectEgressSeparatesResidentialGroups(t *testing.T) {
 	}
 }
 
+func TestSelectEgressSeparatesPremiumGroups(t *testing.T) {
+	manager := NewManager()
+	pool, err := manager.buildPool("subscription", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "us-ordinary", Type: "socks5", Server: "127.0.0.1", Port: 1080, Region: "US"},
+			{Name: "us-premium", Type: "socks5", Server: "127.0.0.1", Port: 1081, Region: "US", Premium: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	manager.pools["subscription"] = pool
+
+	ordinaryChoice, err := manager.SelectEgressFor("US", "random", EgressSelector{})
+	if err != nil {
+		t.Fatalf("select ordinary node: %v", err)
+	}
+	if ordinaryChoice.NodeName != "us-ordinary" || ordinaryChoice.Group != "US" || ordinaryChoice.Premium {
+		t.Fatalf("unexpected ordinary choice: %#v", ordinaryChoice)
+	}
+
+	premiumChoice, err := manager.SelectEgressFor("US", "random", EgressSelector{Premium: true})
+	if err != nil {
+		t.Fatalf("select premium node: %v", err)
+	}
+	if premiumChoice.NodeName != "us-premium" || premiumChoice.Group != "US-PREM" || !premiumChoice.Premium {
+		t.Fatalf("unexpected premium choice: %#v", premiumChoice)
+	}
+
+	status := manager.GetPoolStatus()
+	groups := map[string]RegionGroupStatus{}
+	for _, group := range status[0].RegionGroups {
+		groups[group.Group] = group
+	}
+	if groups["US"].Premium || groups["US"].Count != 1 {
+		t.Fatalf("unexpected ordinary group: %#v", groups["US"])
+	}
+	if !groups["US-PREM"].Premium || groups["US-PREM"].Count != 1 {
+		t.Fatalf("unexpected premium group: %#v", groups["US-PREM"])
+	}
+}
+
 func TestSelectEgressFallsBackToResidentialRegionWhenNormalUnavailable(t *testing.T) {
 	manager := NewManager()
 	pool, err := manager.buildPool("subscription", &PoolConfig{
@@ -799,6 +842,29 @@ func TestSelectAnyEgressSeparatesResidential(t *testing.T) {
 	}
 }
 
+func TestSelectAnyEgressSeparatesPremium(t *testing.T) {
+	manager := NewManager()
+	pool, err := manager.buildPool("subscription", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "us-ordinary", Type: "socks5", Server: "127.0.0.1", Port: 1080, Region: "US"},
+			{Name: "hk-premium", Type: "socks5", Server: "127.0.0.1", Port: 1081, Region: "HK", Premium: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	manager.pools["subscription"] = pool
+
+	choice, err := manager.SelectAnyEgressFor("least-latency", EgressSelector{Premium: true}, 0)
+	if err != nil {
+		t.Fatalf("select premium any egress: %v", err)
+	}
+	if choice.NodeName != "hk-premium" || choice.Group != "ANY-PREM" || !choice.Premium {
+		t.Fatalf("unexpected premium any choice: %#v", choice)
+	}
+}
+
 func TestNodeMetadataCanMapByServerKey(t *testing.T) {
 	manager := NewManager()
 	pool, err := manager.buildPool("subscription", &PoolConfig{
@@ -827,6 +893,39 @@ func TestNodeMetadataCanMapByServerKey(t *testing.T) {
 	}
 	if !util.ContainsString(entry.Tags, "streaming") {
 		t.Fatalf("expected server-key tags, got %#v", entry.Tags)
+	}
+}
+
+func TestPremiumCanComeFromPoolAndTags(t *testing.T) {
+	manager := NewManager()
+	pool, err := manager.buildPool("subscription", &PoolConfig{
+		Source:  "static",
+		Premium: true,
+		Nodes: []dialer.Node{
+			{Name: "provider-pool", Type: "socks5", Server: "pool.example.com", Port: 1080, Region: "US"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	if !pool.Entries[0].Premium {
+		t.Fatalf("expected pool-level premium to apply: %#v", pool.Entries[0])
+	}
+
+	tagged, err := manager.buildPool("tagged", &PoolConfig{
+		Source: "static",
+		NodeTags: map[string][]string{
+			"provider-tag": {"premium"},
+		},
+		Nodes: []dialer.Node{
+			{Name: "provider-tag", Type: "socks5", Server: "tag.example.com", Port: 1080, Region: "US"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build tagged pool: %v", err)
+	}
+	if !tagged.Entries[0].Premium {
+		t.Fatalf("expected premium tag to apply: %#v", tagged.Entries[0])
 	}
 }
 

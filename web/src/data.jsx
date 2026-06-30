@@ -51,9 +51,21 @@ const REGION_FLAGS = {
 };
 
 function normalizeRegionCodeForFlag(code) {
-  const base = String(code || "").trim().toUpperCase().replace(/-RES$/, "");
+  const base = baseRegionCode(code);
   if (base === "UK") return "GB";
   return base;
+}
+
+function baseRegionCode(code) {
+  return String(code || "").trim().toUpperCase().replace(/-(RES|PREM)/g, "");
+}
+
+function egressGroupCode(region, residential, premium) {
+  if (!region) return premium ? "ANY-PREM" : "ANY";
+  let code = String(region || "").trim().toUpperCase();
+  if (residential) code += "-RES";
+  if (premium) code += "-PREM";
+  return code;
 }
 
 function regionFlag(code) {
@@ -121,6 +133,8 @@ const initialPools = [
         region: "US", residential: false, enabled: true, alive: true, latency: 142, fail_count: 0, tags: ["primary"] },
       { id: uid("n"), name: "us-west-2", type: "http_proxy", server: "us2.proxy.internal", port: 8080,
         region: "US", residential: false, enabled: true, alive: true, latency: 168, fail_count: 0, tags: [] },
+      { id: uid("n"), name: "us-premium-01", type: "socks5", server: "premium-us.example.net", port: 1080,
+        region: "US", residential: false, premium: true, enabled: true, alive: true, latency: 96, fail_count: 0, tags: ["premium"] },
       { id: uid("n"), name: "us-res-01", type: "socks5", server: "res-us.example.net", port: 1080,
         region: "US", residential: true, enabled: true, alive: true, latency: 312, fail_count: 0, tags: ["residential"] },
     ],
@@ -185,10 +199,10 @@ function buildRegionGroups(pools) {
     if (!pool.enabled) continue;
     for (const n of pool.nodes || []) {
       if (!n.region || n.region === "UN") continue;
-      const code = n.residential ? `${n.region}-RES` : n.region;
+      const code = egressGroupCode(n.region, n.residential, n.premium);
       if (!groups[code]) {
         groups[code] = {
-          code, region: n.region, residential: !!n.residential,
+          code, region: n.region, residential: !!n.residential, premium: !!n.premium,
           name: REGION_NAMES[n.region] || n.region,
           flag: regionFlag(n.region) || "🏳️",
           count: 0, online: 0, sources: new Set(), latencies: [],
@@ -203,15 +217,18 @@ function buildRegionGroups(pools) {
     }
   }
   // Template fallback availability
-  const hasNormalTpl = pools.some(p => p.source === "template" && p.enabled && !p.residential);
-  const hasResTpl = pools.some(p => p.source === "template" && p.enabled && p.residential);
+  const hasTemplateFor = (group) => pools.some(p =>
+    p.source === "template" && p.enabled && !!p.premium === !!group.premium &&
+    (p.coverage === "both" || !!p.residential === !!group.residential)
+  );
   return Object.values(groups).map(g => ({
     ...g,
     sources: Array.from(g.sources),
     minLatency: g.latencies.length ? Math.min(...g.latencies) : null,
-    templateBackup: g.residential ? hasResTpl : hasNormalTpl,
+    templateBackup: hasTemplateFor(g),
   })).sort((a, b) => {
     if (a.residential !== b.residential) return a.residential ? 1 : -1;
+    if (a.premium !== b.premium) return a.premium ? 1 : -1;
     return a.region.localeCompare(b.region);
   });
 }
@@ -250,9 +267,10 @@ function buildTraffic(pools) {
   for (let i = 0; i < 64; i++) {
     const useTemplate = Math.random() < 0.18;
     const residential = Math.random() < 0.22;
+    const premium = Math.random() < 0.12;
     const candidates = useTemplate
-      ? tplPools.filter(p => !!p.residential === residential)
-      : realNodes.filter(n => !!n.residential === residential);
+      ? tplPools.filter(p => !!p.residential === residential && !!p.premium === premium)
+      : realNodes.filter(n => !!n.residential === residential && !!n.premium === premium);
     let region, pool, node, isTpl = false;
     if (useTemplate && candidates.length) {
       const codes = ["US","HK","JP","TW","SG","NG","IN","BR","KR","DE"];
@@ -281,9 +299,10 @@ function buildTraffic(pools) {
       method: METHODS[Math.floor(Math.random() * METHODS.length)],
       url: `https://${TARGETS[Math.floor(Math.random() * TARGETS.length)]}/v1/path/${(Math.random()+1).toString(36).substring(2,8)}`,
       region,
-      group: residential ? `${region}-RES` : region,
+      group: egressGroupCode(region, residential, premium),
       strategy: STRATEGIES[Math.floor(Math.random() * STRATEGIES.length)],
       residential,
+      premium,
       pool,
       node,
       template: isTpl,
@@ -332,7 +351,7 @@ function buildTraffic(pools) {
 }
 
 window.PG = {
-  REGION_NAMES, REGION_FLAGS, regionFlag,
+  REGION_NAMES, REGION_FLAGS, regionFlag, baseRegionCode, egressGroupCode,
   initialPools, initialFingerprints,
   buildRegionGroups, buildTraffic,
   uid,

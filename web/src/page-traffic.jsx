@@ -36,6 +36,7 @@ function PageTraffic({ state, dispatch, busy }) {
   const canLoadMore = rawLoaded > 0 && rawLoaded < Math.min(rawTotal || 1000, 1000) && rawLoaded % 200 === 0;
   const tunnels = traffic.requests.filter(r => r.type === "tunnel").length;
   const toggleExpanded = (id) => setExpanded(s => ({ ...s, [id]: !s[id] }));
+  const saveGroupingRule = (rule) => dispatch?.({ type: "addTrafficGroupingRule", rule });
   const exportCSV = () => {
     const header = ["time","type","method","url","region","pool","node","status","duration_ms","bytes","count","error"];
     const lines = rows.map(r => [
@@ -129,7 +130,7 @@ function PageTraffic({ state, dispatch, busy }) {
       </div>
 
       <Drawer open={!!open} onClose={() => setOpen(null)} title="Request detail">
-        <RequestDetailContent request={open}/>
+        <RequestDetailContent request={open} onSaveGroupingRule={saveGroupingRule}/>
       </Drawer>
     </div>
   );
@@ -165,7 +166,7 @@ function TrafficRow({ row, openDetail, expanded, toggleExpanded, child }) {
         {row.url}
         {canExpand && <span className="muted-2" style={{marginLeft:8, fontSize:10}}>merged failures</span>}
       </td>
-      <td><RegionPill code={row.group} residential={row.residential}/></td>
+      <td><RegionPill code={row.group} residential={row.residential} premium={row.premium}/></td>
       <td className="mono" style={{fontSize:11.5}}>
         <div>{row.pool}{row.template && <span className="muted-2" style={{marginLeft:6, fontSize:10}}>tpl</span>}</div>
         <div className="muted-2 truncate" style={{maxWidth:180, fontSize:10.5, marginTop:2}}>{row.node}</div>

@@ -2,13 +2,13 @@
 
 日期：2026-05-04
 
-更新：2026-06-18
+更新：2026-07-01
 
 ## 目标
 
-Chijie 当前只维护节点池。调用方在请求里声明 `egress.region`、`egress.strategy`、`egress.residential` 和 `egress.tls_fingerprint`，后端根据这些参数选择出口。
+Chijie 当前只维护节点池。调用方在请求里声明 `egress.region`、`egress.strategy`、`egress.residential`、`egress.premium` 和 `egress.tls_fingerprint`，后端根据这些参数选择出口。
 
-订阅源导入后，系统把节点保留在对应的 subscription 节点池中，并为每个节点计算地区组。普通节点进入 `US`、`HK`、`JP` 这类普通地区组；家宽节点进入 `US-RES`、`HK-RES`、`JP-RES` 这类家宽地区组。
+订阅源导入后，系统把节点保留在对应的 subscription 节点池中，并为每个节点计算地区组。普通节点进入 `US`、`HK`、`JP` 这类普通地区组；家宽节点进入 `US-RES`、`HK-RES`、`JP-RES` 这类家宽地区组；高端节点进入 `US-PREM` 这类高端地区组；高端家宽节点进入 `US-RES-PREM` 这类组合地区组。
 
 ## subscription 配置字段
 
@@ -20,13 +20,14 @@ Chijie 当前只维护节点池。调用方在请求里声明 `egress.region`、
 - `reject_regex`：订阅节点屏蔽正则列表。
 - `node_regions`：节点名到地区代码的修正表。
 - `node_aliases`：别名到节点名的映射，供后台展示和人工识别使用。
-- `node_tags`：节点名到标签列表的修正表，例如手动标记 `residential`。
+- `node_tags`：节点名到标签列表的修正表，例如手动标记 `residential` 或 `premium`。
 - `node_server_regions`：`server:port` 到地区代码的修正表，适合订阅节点名称变化但出口地址稳定的场景。
 - `node_server_aliases`：`server:port` 到别名的映射。
 - `node_server_tags`：`server:port` 到标签列表的映射。
 - `region_group_names`：地区代码到分组展示名的映射。
 - `tags`：节点池级标签。
 - `residential`：池级家宽标识，设置后该池内节点默认进入家宽地区组。
+- `premium`：池级高端标识，设置后该池内节点默认进入高端地区组。
 
 订阅地址只允许 `http` / `https`，默认拒绝私网、回环、CGNAT 和保留地址。单次订阅响应 body 上限为 4 MB，超过后该订阅地址按失败处理。运行时已有旧节点时，自动刷新或配置重载的最新一次拉取失败不会清空该池节点，系统保留上一次成功拉取的节点并记录池级错误。
 
@@ -49,12 +50,13 @@ node_pools:
       openai-us-primary: "US Los Angeles 01"
     node_tags:
       "US Residential 01": [residential]
+      "US CF Bypass 01": [premium]
     node_server_aliases:
       "aws-link1.liangxin1.xyz:35248": hk-streaming-primary
     node_server_regions:
       "aws-link1.liangxin1.xyz:35248": HK
     node_server_tags:
-      "aws-link1.liangxin1.xyz:35248": [streaming]
+      "aws-link1.liangxin1.xyz:35248": [streaming, premium]
     region_group_names:
       US: 美国出口
       JP: 日本出口
@@ -82,6 +84,17 @@ node_pools:
 
 普通请求不会选择家宽节点。家宽请求不会选择普通节点。
 
+## 高端识别
+
+节点进入高端组的条件：
+
+- 节点自身配置 `premium: true`。
+- 节点池配置 `premium: true`。
+- 节点标签包含 `premium` 或 `high-end`。
+- 节点名包含高端、premium、high-end 等可识别字样。
+
+普通请求不会选择高端节点。高端请求只选择高端节点；如果同时设置 `residential=true`，则选择高端家宽节点。
+
 ## 出口选择
 
 请求示例：
@@ -94,6 +107,7 @@ node_pools:
     "region": "US",
     "strategy": "least-latency",
     "residential": false,
+    "premium": false,
     "tls_fingerprint": "chrome"
   }
 }
@@ -101,15 +115,17 @@ node_pools:
 
 选择流程：
 
-1. `region` 为空时使用直连出口。
-2. `region` 非空时标准化为大写二字母地区码。
-3. `residential=false` 查找普通地区组，例如 `US`。
-4. `residential=true` 查找家宽地区组，例如 `US-RES`。
-5. 先从可用静态节点和订阅节点中选择。
-6. 如果没有可用节点，且订阅池开启 `try_offline`，某地区只有一个离线订阅节点时会在模板前尝试该节点。
-7. 地区组内没有可用节点时，使用同类型模板节点。
-8. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板。
-9. 没有可用节点也没有可用模板时返回错误。
+1. `region` 为空且 `premium` 不是 `true` 时使用直连出口。
+2. `premium=true` 且 `region` 为空时选择任意高端非直连出口。
+3. `region` 非空时标准化为大写二字母地区码。
+4. `residential=false` 查找普通地区组，例如 `US`。
+5. `residential=true` 查找家宽地区组，例如 `US-RES`。
+6. `premium=true` 查找高端地区组，例如 `US-PREM` 或 `US-RES-PREM`。
+7. 先从可用静态节点和订阅节点中选择。
+8. 如果没有可用节点，且订阅池开启 `try_offline`，某地区只有一个离线订阅节点时会在模板前尝试该节点。
+9. 地区组内没有可用节点时，使用同类型模板节点。
+10. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板；高端请求只在高端集合内降级。
+11. 没有可用节点也没有可用模板时返回错误。
 
 `strategy` 只在当前候选集合内生效：
 
@@ -164,6 +180,7 @@ node_pools:
 - `region`
 - `region_group`
 - `residential`
+- `premium`
 - `alias`
 - `tags`
 - `enabled`
@@ -173,10 +190,11 @@ node_pools:
 
 每个节点池还返回 `region_groups`：
 
-- `group`：地区组代码，例如 `US`、`US-RES`。
+- `group`：地区组代码，例如 `US`、`US-RES`、`US-PREM`。
 - `region`：二字母地区码。
 - `name`：展示名。
 - `residential`：是否家宽组。
+- `premium`：是否高端组。
 - `count`：组内节点数。
 - `online`：组内可用节点数。
 

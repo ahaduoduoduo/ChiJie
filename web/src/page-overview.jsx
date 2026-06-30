@@ -20,7 +20,7 @@ function RecentTrafficCard({ title, rows, empty, detail, onSelect }) {
             <tbody>{rows.map(r => (
               <tr key={r.id} onClick={() => onSelect?.(r)} style={{cursor: onSelect ? "pointer" : "default"}}>
                 <td className="mono muted-2">{fmtAgo(r.ts)} ago</td>
-                <td><RegionPill code={r.group} residential={r.residential}/></td>
+                <td><RegionPill code={r.group} residential={r.residential} premium={r.premium}/></td>
                 <td className="mono">{r.pool}</td>
                 <td><StatusCode code={r.status}/></td>
                 <td className="muted truncate" style={{maxWidth:360}}>{detail(r)}</td>
@@ -31,7 +31,7 @@ function RecentTrafficCard({ title, rows, empty, detail, onSelect }) {
   );
 }
 
-function PageOverview({ state }) {
+function PageOverview({ state, dispatch }) {
   const { pools, traffic, regionGroups, stats } = state;
   const [open, setOpen] = React.useState(null);
   const totalNodes = pools.flatMap(p => p.nodes || []).length;
@@ -43,6 +43,7 @@ function PageOverview({ state }) {
   const successes = recent.filter(isTrafficSuccess).slice(0, 5);
   const errs = recent.filter(isTrafficError).slice(0, 5);
   const uptime = stats?.uptime ? stats.uptime.replace(/(\.\d+)?s$/, "s") : "—";
+  const saveGroupingRule = (rule) => dispatch?.({ type: "addTrafficGroupingRule", rule });
 
   return (
     <div className="page">
@@ -96,7 +97,7 @@ function PageOverview({ state }) {
         <div className="card-body" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:1, padding: 0, background: "var(--line)"}}>
           {regionGroups.map(g => (
             <div key={g.code} style={{padding:"18px 20px", background:"var(--bg-1)"}}>
-              <RegionPill code={g.code} residential={g.residential}/>
+              <RegionPill code={g.code} residential={g.residential} premium={g.premium}/>
               <div style={{marginTop:14, fontSize:24, fontWeight:400, letterSpacing:"-0.02em", fontFamily:"'JetBrains Mono', monospace"}}>
                 {g.online}<span style={{color:"var(--fg-3)", fontSize:13}}>/{g.count}</span>
               </div>
@@ -125,7 +126,7 @@ function PageOverview({ state }) {
       />
 
       <Drawer open={!!open} onClose={() => setOpen(null)} title="Request detail">
-        <RequestDetailContent request={open}/>
+        <RequestDetailContent request={open} onSaveGroupingRule={saveGroupingRule}/>
       </Drawer>
     </div>
   );

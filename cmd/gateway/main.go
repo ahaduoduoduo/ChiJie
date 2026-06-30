@@ -45,6 +45,7 @@ type GatewayConfig struct {
 	} `yaml:"admin"`
 	HealthCheck pool.HealthCheckConfig      `yaml:"health_check"`
 	Proxy       *server.ProxySettingsConfig `yaml:"proxy"`
+	Traffic     traffic.Config              `yaml:"traffic"`
 	Log         struct {
 		Level string `yaml:"level"`
 		File  string `yaml:"file"`
@@ -124,6 +125,7 @@ func main() {
 	}
 
 	trafficStore := traffic.NewStore(1000)
+	trafficStore.UpdateConfig(gatewayConfig.Traffic)
 
 	// 创建代理服务器，Admin 设置页会复用同一个运行时配置入口。
 	srv := server.NewServer(&server.Config{
