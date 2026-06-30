@@ -442,3 +442,11 @@
 日期：2026-06-30
 
 - [x] 前端保留后端返回的 `bucket.p95_latency_ms = 0`，避免失败-only 分钟桶被全局 P95 覆盖
+
+## P48 — Proxy 按请求跟随 Redirect ✅
+日期：2026-07-01
+
+- [x] `POST /proxy` 新增 `follow_redirects` 请求字段，默认保持不自动跟随
+- [x] `follow_redirects=true` 时返回最终页面响应，并通过 `X-Chijie-*` 响应头返回最终 URL 与跳转明细
+- [x] 新增 `proxy.max_redirects` 全局配置，默认 `5`，Admin System 页面支持保存
+- [x] 每次跳转目标继续执行目标 URL 安全校验，达到最大跳转次数时返回最后一个 3xx 响应

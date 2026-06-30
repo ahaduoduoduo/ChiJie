@@ -198,14 +198,14 @@ log:
 	server := NewServer("127.0.0.1:0", manager, fingerprint.NewManager(), dir, "", "1234567890123456", "24h", nil)
 	server.SetProxySettingsRuntime(runtime)
 
-	reqBody := []byte(`{"max_attempts":8,"template_fallback_after_attempts":false,"response_header_timeout":"4s","total_timeout":"45s"}`)
+	reqBody := []byte(`{"max_attempts":8,"max_redirects":6,"template_fallback_after_attempts":false,"response_header_timeout":"4s","total_timeout":"45s"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/system/proxy", bytes.NewReader(reqBody))
 	rec := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT proxy settings status = %d, body: %s", rec.Code, rec.Body.String())
 	}
-	if runtime.settings.MaxAttempts != 8 || runtime.settings.TemplateFallbackAfterAttempts || runtime.settings.ResponseHeaderTimeout != 4*time.Second || runtime.settings.TotalTimeout != 45*time.Second {
+	if runtime.settings.MaxAttempts != 8 || runtime.settings.MaxRedirects != 6 || runtime.settings.TemplateFallbackAfterAttempts || runtime.settings.ResponseHeaderTimeout != 4*time.Second || runtime.settings.TotalTimeout != 45*time.Second {
 		t.Fatalf("runtime settings not updated: %#v", runtime.settings)
 	}
 
@@ -215,7 +215,7 @@ log:
 	if err := loadYAML(gatewayPath, &stored); err != nil {
 		t.Fatalf("load persisted gateway config: %v", err)
 	}
-	if stored.Proxy.MaxAttempts != 8 || stored.Proxy.TemplateFallbackAfterAttempts == nil || *stored.Proxy.TemplateFallbackAfterAttempts || stored.Proxy.ResponseHeaderTimeout != "4s" || stored.Proxy.TotalTimeout != "45s" {
+	if stored.Proxy.MaxAttempts != 8 || stored.Proxy.MaxRedirects != 6 || stored.Proxy.TemplateFallbackAfterAttempts == nil || *stored.Proxy.TemplateFallbackAfterAttempts || stored.Proxy.ResponseHeaderTimeout != "4s" || stored.Proxy.TotalTimeout != "45s" {
 		t.Fatalf("unexpected persisted proxy settings: %#v", stored.Proxy)
 	}
 }

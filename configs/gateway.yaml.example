@@ -36,6 +36,8 @@ proxy:
   total_timeout: "30s"
   # 单次 /proxy 出口执行失败时，最多尝试多少个可用静态/订阅节点。
   max_attempts: 5
+  # follow_redirects=true 时，单次请求最多跟随多少次 HTTP redirect。
+  max_redirects: 5
   # 可用节点都失败后，是否继续尝试同地区同类型模板节点。
   template_fallback_after_attempts: true
 

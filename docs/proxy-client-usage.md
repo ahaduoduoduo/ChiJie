@@ -68,6 +68,7 @@ Content-Type: application/json
     "Content-Type": "application/json"
   },
   "payload": "{\"hello\":\"world\"}",
+  "follow_redirects": false,
   "egress": {
     "region": "US",
     "strategy": "least-latency",
@@ -85,6 +86,7 @@ Content-Type: application/json
 | `method` | string | 否 | 目标请求方法，默认 `GET` |
 | `headers` | object | 否 | 发送给目标站点的请求 Header；目标站点 Cookie 需要显式写入 `headers.Cookie` |
 | `payload` | string | 否 | 发送给目标站点的请求 Body；`GET` / `HEAD` 会忽略该字段 |
+| `follow_redirects` | boolean | 否 | 是否由 Chijie 自动跟随 HTTP redirect，默认 `false` |
 | `egress.region` | string | 否 | 二字母地区码，例如 `US`、`HK`、`JP`、`GB`；为空表示直连 |
 | `egress.any` | boolean | 否 | 为 `true` 时选择任意非直连出口 |
 | `egress.max_latency_ms` | number | 否 | 配合 `any=true` 使用，按最近健康检查延迟过滤候选出口 |
@@ -106,7 +108,19 @@ Chijie 不保存 cookie，不会自动把本次响应里的 `Set-Cookie` 转成�
 {"ip":"203.0.113.10"}
 ```
 
-目标站点返回 `302` 时，Chijie 默认不自动跟随跳转，而是把 `302` 响应返回给调用方。
+目标站点返回 `302` 时，Chijie 默认不自动跟随跳转，而是把 `302` 响应返回给调用方，并转发目标站点的 `Location` 响应头。
+
+请求中传入 `"follow_redirects": true` 时，Chijie 会自动跟随 HTTP redirect，最终返回最后页面的原始 status code、`Content-Type` 和响应体。响应头会附带跳转细节：
+
+| 响应头 | 含义 |
+| --- | --- |
+| `X-Chijie-Final-URL` | 最终响应对应的 URL |
+| `X-Chijie-Redirect-Count` | 已跟随的跳转次数 |
+| `X-Chijie-Max-Redirects` | 当前全局最大跳转次数配置 |
+| `X-Chijie-Redirects` | JSON 数组，包含每次跳转的 `status_code`、`from_url`、`to_url`、`from_method`、`to_method` 和原始 `location` |
+| `X-Chijie-Redirect-Limit-Reached` | 达到最大跳转次数时为 `true` |
+
+`follow_redirects=true` 时，每个跳转目标都会继续执行目标 URL 安全校验。超过 `proxy.max_redirects` 后，Chijie 返回最后一个未继续跟随的 3xx 响应。
 
 失败时，Chijie 返回 JSON：
 
@@ -131,7 +145,7 @@ Chijie 不保存 cookie，不会自动把本次响应里的 `Set-Cookie` 转成�
 
 ### 出口失败自动重试
 
-`/proxy` 通过单个出口访问目标站点时使用 `gateway.yaml` 的 `proxy.response_header_timeout` 控制等待响应头的超时，默认 `3s`。目标站点开始返回响应后，读取 body 继续受 `proxy.total_timeout` 约束，完整请求总超时默认 `30s`。在非直连出口执行失败时会按 `proxy.max_attempts` 继续尝试候选静态/订阅节点，默认最多 5 个。失败节点会立即标记为 `Alive=false`，后台健康检查成功后可恢复。开启 `proxy.template_fallback_after_attempts` 时，可用节点都失败后继续尝试同地区同类型模板节点。
+`/proxy` 通过单个出口访问目标站点时使用 `gateway.yaml` 的 `proxy.response_header_timeout` 控制等待响应头的超时，默认 `3s`。目标站点开始返回响应后，读取 body 继续受 `proxy.total_timeout` 约束，完整请求总超时默认 `30s`。`follow_redirects=true` 时按 `proxy.max_redirects` 限制最大跳转次数，默认最多 5 次。在非直连出口执行失败时会按 `proxy.max_attempts` 继续尝试候选静态/订阅节点，默认最多 5 个。失败节点会立即标记为 `Alive=false`，后台健康检查成功后可恢复。开启 `proxy.template_fallback_after_attempts` 时，可用节点都失败后继续尝试同地区同类型模板节点。
 
 - `least-latency`：第一次使用最低延迟候选，失败后使用下一个延迟候选。
 - `random`：候选顺序随机，失败后使用下一个随机候选。
@@ -439,7 +453,7 @@ Authorization: Bearer <proxy_token>
 - `/proxy` 请求 JSON body 上限为 `10 MB`。
 - `/proxy` 上游响应 body 上限为 `32 MB`。
 - `/proxy` 单个出口等待目标响应头的超时时间由 `proxy.response_header_timeout` 控制，默认 `3s`；完整请求总时长由 `proxy.total_timeout` 控制，默认 `30s`。
-- `/proxy` 默认不自动跟随 HTTP redirect。
+- `/proxy` 默认不自动跟随 HTTP redirect；请求传入 `follow_redirects=true` 后最多跟随 `proxy.max_redirects` 次，默认 `5`。
 
 ## 给 AI Agent 的最小说明
 
@@ -461,6 +475,7 @@ Content-Type: application/json
   "method": "GET",
   "headers": {},
   "payload": "",
+  "follow_redirects": false,
   "egress": {
     "region": "US",
     "strategy": "least-latency",

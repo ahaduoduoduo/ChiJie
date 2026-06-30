@@ -97,6 +97,8 @@ proxy:
   total_timeout: "30s"
   # 单次 /proxy 出口执行失败时最多尝试的可用静态/订阅节点数量。
   max_attempts: 5
+  # follow_redirects=true 时单次请求最多跟随的 HTTP redirect 次数。
+  max_redirects: 5
   # 可用节点全部失败后继续尝试同地区同类型模板节点。
   template_fallback_after_attempts: true
 ```
@@ -156,6 +158,7 @@ Content-Type: application/json
     "Content-Type": "application/json"
   },
   "payload": "{\"hello\":\"world\"}",
+  "follow_redirects": false,
   "egress": {
     "region": "US",
     "strategy": "least-latency",
@@ -175,6 +178,7 @@ Proxy token 是无状态 JWT，只在生成弹窗中显示一次；后台不保�
 - `method`：目标请求方法，缺省为 `GET`。
 - `headers`：目标请求 Header；目标站点 Cookie 需要显式写入 `headers.Cookie`。
 - `payload`：目标请求 Body。`GET` 和 `HEAD` 请求不会发送 Body。
+- `follow_redirects`：是否由网关自动跟随 HTTP redirect，缺省为 `false`。
 - `egress.region`：二字母地区码；空字符串表示直连。
 - `egress.any`：为 `true` 时不指定地区，选择一个非直连静态/订阅出口；也可将 `region` 传为 `*`、`ANY` 或 `AUTO`。
 - `egress.max_latency_ms`：配合 `egress.any` 使用，限制候选出口最近健康检查延迟上限；`0` 表示不限制。
@@ -182,7 +186,9 @@ Proxy token 是无状态 JWT，只在生成弹窗中显示一次；后台不保�
 - `egress.residential`：是否使用家宽出口。
 - `egress.tls_fingerprint`：TLS 指纹名称、预设名、JA3 raw、JA4 raw、Akamai raw 或可解析的配置字符串；测试结果以远端返回的真实指纹信息为准。
 
-响应使用目标服务器的 status code、`Content-Type` 和响应体。目标服务器返回的 `Set-Cookie` 会逐条写入 `/proxy` 响应头；网关不保存 cookie、不自动生成下一次请求的 `Cookie`，也不改写 cookie 的 `Domain` / `Path`。
+响应使用目标服务器的 status code、`Content-Type` 和响应体。目标服务器返回的 `Set-Cookie` 会逐条写入 `/proxy` 响应头；网关不保存 cookie、不自动生成下一次请求的 `Cookie`，也不改写 cookie 的 `Domain` / `Path`。目标服务器返回 3xx 且 `follow_redirects=false` 时，网关保留 3xx 状态并转发 `Location` 响应头。
+
+`follow_redirects=true` 时，网关按 `proxy.max_redirects` 自动跟随跳转，默认最多 5 次。最终响应仍是最终页面的原始 status code、`Content-Type` 和 body，并额外写入 `X-Chijie-Final-URL`、`X-Chijie-Redirect-Count`、`X-Chijie-Max-Redirects`、`X-Chijie-Redirects`。超过次数限制时返回最后一个未继续跟随的 3xx 响应，并写入 `X-Chijie-Redirect-Limit-Reached: true`。每次跳转目标都会继续执行 `/proxy` 的目标 URL 安全校验。
 
 如果选中的非直连出口在建立连接或等待响应头阶段失败（例如 `EOF`、拨号失败、代理断流、TLS 握手失败），`/proxy` 会按当前策略继续换候选出口，默认最多尝试 5 个可用静态/订阅节点。失败的静态/订阅节点会立即标记为 `Alive=false`，后续可由健康检查恢复。目标站点已经返回 HTTP 状态码时不会重试，例如真实的 `403`、`404`、`502` 会原样返回给调用方。
 
@@ -195,7 +201,7 @@ Proxy token 是无状态 JWT，只在生成弹窗中显示一次；后台不保�
 5. `residential=true` 查找家宽地区组，例如 `US-RES`。
 6. 地区组内存在可用静态节点或订阅节点时，按 `strategy` 选择节点。
 7. 订阅池开启 `try_offline` 且某地区只有一个离线订阅节点时，在模板 fallback 前允许该节点再尝试一次。
-8. 每个出口访问目标站点时使用 `proxy.response_header_timeout` 控制等待响应头的超时，默认 `3s`；使用 `proxy.total_timeout` 控制完整请求总时长，默认 `30s`；开启 `proxy.template_fallback_after_attempts` 时，地区组内可用节点连续失败达到 `proxy.max_attempts` 后继续尝试同类型模板节点；地区组内没有可用节点时也会直接使用同类型模板节点。
+8. 每个出口访问目标站点时使用 `proxy.response_header_timeout` 控制等待响应头的超时，默认 `3s`；使用 `proxy.total_timeout` 控制完整请求总时长，默认 `30s`；`follow_redirects=true` 时最多跟随 `proxy.max_redirects` 次 redirect，默认 5 次；开启 `proxy.template_fallback_after_attempts` 时，地区组内可用节点连续失败达到 `proxy.max_attempts` 后继续尝试同类型模板节点；地区组内没有可用节点时也会直接使用同类型模板节点。
 9. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板。
 10. 没有可用节点也没有可用模板时返回错误。
 

@@ -38,11 +38,19 @@ const DefaultProxyResponseHeaderTimeout = 3 * time.Second
 // DefaultProxyTotalTimeout 是一次 /proxy 出口 HTTP 请求从开始到响应体读取完成的默认总超时。
 const DefaultProxyTotalTimeout = 30 * time.Second
 
+// DefaultProxyMaxRedirects 是 follow_redirects=true 时单次 /proxy 请求允许跟随的默认跳转次数。
+const DefaultProxyMaxRedirects = 5
+
 // MaxChijieProxyHops 限制 Chijie 之间互相转发时的最大跳数，防止 A/B 循环。
 const MaxChijieProxyHops = 3
 
 const chijieHopHeader = "X-Chijie-Hop"
 const chijieErrorHeader = "X-Chijie-Error"
+const chijieFinalURLHeader = "X-Chijie-Final-URL"
+const chijieRedirectCountHeader = "X-Chijie-Redirect-Count"
+const chijieMaxRedirectsHeader = "X-Chijie-Max-Redirects"
+const chijieRedirectsHeader = "X-Chijie-Redirects"
+const chijieRedirectLimitReachedHeader = "X-Chijie-Redirect-Limit-Reached"
 
 var errProxyResponseTooLarge = errors.New("upstream response body is too large")
 
@@ -75,6 +83,7 @@ type Server struct {
 // TemplateFallbackAfterAttempts 使用指针以区分“未配置”和“显式 false”。
 type ProxySettingsConfig struct {
 	MaxAttempts                   int    `yaml:"max_attempts" json:"max_attempts"`
+	MaxRedirects                  int    `yaml:"max_redirects" json:"max_redirects"`
 	TemplateFallbackAfterAttempts *bool  `yaml:"template_fallback_after_attempts" json:"template_fallback_after_attempts"`
 	ResponseHeaderTimeout         string `yaml:"response_header_timeout" json:"response_header_timeout"`
 	TotalTimeout                  string `yaml:"total_timeout" json:"total_timeout"`
@@ -84,6 +93,7 @@ type ProxySettingsConfig struct {
 // ProxySettings 是运行时归一化后的 /proxy 重试配置。
 type ProxySettings struct {
 	MaxAttempts                   int           `json:"max_attempts" yaml:"max_attempts"`
+	MaxRedirects                  int           `json:"max_redirects" yaml:"max_redirects"`
 	TemplateFallbackAfterAttempts bool          `json:"template_fallback_after_attempts" yaml:"template_fallback_after_attempts"`
 	ResponseHeaderTimeout         time.Duration `json:"response_header_timeout" yaml:"response_header_timeout"`
 	TotalTimeout                  time.Duration `json:"total_timeout" yaml:"total_timeout"`
@@ -92,6 +102,7 @@ type ProxySettings struct {
 func DefaultProxySettings() ProxySettings {
 	return ProxySettings{
 		MaxAttempts:                   DefaultProxyMaxAttempts,
+		MaxRedirects:                  DefaultProxyMaxRedirects,
 		TemplateFallbackAfterAttempts: true,
 		ResponseHeaderTimeout:         DefaultProxyResponseHeaderTimeout,
 		TotalTimeout:                  DefaultProxyTotalTimeout,
@@ -105,6 +116,9 @@ func ParseProxySettings(cfg *ProxySettingsConfig) (ProxySettings, error) {
 	}
 	if cfg.MaxAttempts > 0 {
 		settings.MaxAttempts = cfg.MaxAttempts
+	}
+	if cfg.MaxRedirects > 0 {
+		settings.MaxRedirects = cfg.MaxRedirects
 	}
 	if cfg.TemplateFallbackAfterAttempts != nil {
 		settings.TemplateFallbackAfterAttempts = *cfg.TemplateFallbackAfterAttempts
@@ -138,6 +152,12 @@ func ValidateProxySettings(settings ProxySettings) (ProxySettings, error) {
 	if settings.MaxAttempts > 50 {
 		return settings, fmt.Errorf("proxy.max_attempts must be between 1 and 50")
 	}
+	if settings.MaxRedirects <= 0 {
+		settings.MaxRedirects = DefaultProxyMaxRedirects
+	}
+	if settings.MaxRedirects > 50 {
+		return settings, fmt.Errorf("proxy.max_redirects must be between 1 and 50")
+	}
 	if settings.ResponseHeaderTimeout <= 0 {
 		settings.ResponseHeaderTimeout = DefaultProxyResponseHeaderTimeout
 	}
@@ -151,6 +171,7 @@ func ProxySettingsConfigFromSettings(settings ProxySettings) *ProxySettingsConfi
 	value := settings.TemplateFallbackAfterAttempts
 	return &ProxySettingsConfig{
 		MaxAttempts:                   settings.MaxAttempts,
+		MaxRedirects:                  settings.MaxRedirects,
 		TemplateFallbackAfterAttempts: &value,
 		ResponseHeaderTimeout:         settings.ResponseHeaderTimeout.String(),
 		TotalTimeout:                  settings.TotalTimeout.String(),
@@ -159,19 +180,26 @@ func ProxySettingsConfigFromSettings(settings ProxySettings) *ProxySettingsConfi
 
 // ProxyRequest 客户端发来的代理请求
 type ProxyRequest struct {
-	URL     string            `json:"url"`
-	Method  string            `json:"method"`
-	Headers map[string]string `json:"headers"`
-	Payload string            `json:"payload"`
-	Egress  EgressOptions     `json:"egress"`
-	Hop     int               `json:"-"`
+	URL             string            `json:"url"`
+	Method          string            `json:"method"`
+	Headers         map[string]string `json:"headers"`
+	Payload         string            `json:"payload"`
+	FollowRedirects bool              `json:"follow_redirects"`
+	Egress          EgressOptions     `json:"egress"`
+	Hop             int               `json:"-"`
 }
 
 type proxyResponse struct {
-	Body        []byte
-	ContentType string
-	SetCookies  []string
-	StatusCode  int
+	Body                 []byte
+	ContentType          string
+	Location             string
+	SetCookies           []string
+	StatusCode           int
+	FinalURL             string
+	Redirects            []proxyRedirect
+	RedirectMax          int
+	RedirectDetails      bool
+	RedirectLimitReached bool
 }
 
 // EgressOptions 由调用方直接声明出口需求。
@@ -286,6 +314,10 @@ func (s *Server) proxyResponseHeaderTimeout() time.Duration {
 
 func (s *Server) proxyTotalTimeout() time.Duration {
 	return s.ProxySettings().TotalTimeout
+}
+
+func (s *Server) proxyMaxRedirects() int {
+	return s.ProxySettings().MaxRedirects
 }
 
 func (s *Server) applyProxyResponseHeaderTimeout(transport *http.Transport) {
@@ -427,11 +459,15 @@ func writeProxyResponse(w http.ResponseWriter, resp *proxyResponse) {
 	if resp.ContentType != "" {
 		w.Header().Set("Content-Type", resp.ContentType)
 	}
+	if resp.Location != "" {
+		w.Header().Set("Location", resp.Location)
+	}
 	for _, cookie := range resp.SetCookies {
 		if strings.TrimSpace(cookie) != "" {
 			w.Header().Add("Set-Cookie", cookie)
 		}
 	}
+	writeRedirectHeaders(w, resp)
 	w.WriteHeader(resp.StatusCode)
 	w.Write(resp.Body)
 }
@@ -611,6 +647,9 @@ func isRetryableProxyAttempt(ctx context.Context, err error) bool {
 	if ctx != nil && ctx.Err() != nil {
 		return false
 	}
+	if isProxyRedirectError(err) {
+		return false
+	}
 	var attemptErr *proxyAttemptError
 	return errors.As(err, &attemptErr)
 }
@@ -661,10 +700,9 @@ func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRo
 			client := &http.Client{
 				Transport: fingerprint.NewHTTP2RoundTripperWithResponseLimitAndHeaderTimeout(helloID, spec, "", d.DialContext, fpConfig, MaxProxyResponseBytes, s.proxyResponseHeaderTimeout()),
 				Timeout:   s.proxyTotalTimeout(),
-				CheckRedirect: func(req *http.Request, via []*http.Request) error {
-					return http.ErrUseLastResponse
-				},
 			}
+			redirects := s.newProxyRedirectTracker(req)
+			client.CheckRedirect = redirects.CheckRedirect
 
 			startTime := time.Now()
 			resp, err := client.Do(httpReq)
@@ -678,6 +716,7 @@ func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRo
 			if err != nil {
 				return nil, fmt.Errorf("read response: %w", err)
 			}
+			redirects.Apply(proxyResp, resp)
 
 			util.Debugf("[egress] %dms via %s → %d (%d bytes)", elapsed.Milliseconds(), d.Name(), resp.StatusCode, len(proxyResp.Body))
 			return proxyResp, nil
@@ -687,10 +726,9 @@ func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRo
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   s.proxyTotalTimeout(),
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
 	}
+	redirects := s.newProxyRedirectTracker(req)
+	client.CheckRedirect = redirects.CheckRedirect
 
 	startTime := time.Now()
 	resp, err := client.Do(httpReq)
@@ -704,6 +742,7 @@ func (s *Server) doProxy(ctx context.Context, req *ProxyRequest, route *egressRo
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
+	redirects.Apply(proxyResp, resp)
 
 	util.Debugf("[egress] %dms via %s → %d (%d bytes)", elapsed.Milliseconds(), d.Name(), resp.StatusCode, len(proxyResp.Body))
 	return proxyResp, nil
@@ -766,6 +805,7 @@ func (s *Server) doRemoteChijieProxy(ctx context.Context, req *ProxyRequest, rou
 	if err != nil {
 		return nil, fmt.Errorf("read remote chijie response: %w", err)
 	}
+	applyRedirectHeadersFromRemote(proxyResp, resp.Header)
 	if resp.Header.Get(chijieErrorHeader) != "" {
 		detail := strings.TrimSpace(string(proxyResp.Body))
 		if len(detail) > 240 {
@@ -786,6 +826,7 @@ func buildProxyResponse(resp *http.Response) (*proxyResponse, error) {
 	return &proxyResponse{
 		Body:        respBody,
 		ContentType: resp.Header.Get("Content-Type"),
+		Location:    resp.Header.Get("Location"),
 		SetCookies:  append([]string(nil), resp.Header.Values("Set-Cookie")...),
 		StatusCode:  resp.StatusCode,
 	}, nil

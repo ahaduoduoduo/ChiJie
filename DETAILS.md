@@ -105,7 +105,7 @@ chijie/
 
 ### server（请求入口）
 
-接收 `POST /proxy` 请求，完成认证、JSON 解包、`egress` 参数解析、出口候选排序、TLS 指纹包装、目标请求执行、上游 `Set-Cookie` 响应头转发、出口失败重试、失败节点即时离线、模板延后兜底、响应大小限制和流量记录。
+接收 `POST /proxy` 请求，完成认证、JSON 解包、`egress` 参数解析、出口候选排序、TLS 指纹包装、目标请求执行、按请求跟随 redirect、上游 `Location` / `Set-Cookie` 响应头转发、出口失败重试、失败节点即时离线、模板延后兜底、响应大小限制和流量记录。
 
 `ProxyRequest` 当前字段：
 
@@ -113,6 +113,7 @@ chijie/
 - `method`：目标请求方法，缺省为 `GET`。
 - `headers`：目标请求 Header，包括调用方显式传入的 `Cookie`。
 - `payload`：目标请求 Body。
+- `follow_redirects`：是否自动跟随 HTTP redirect，缺省为 `false`。
 - `egress`：出口参数，包括 `region`、`any`、`max_latency_ms`、`strategy`、`residential`、`tls_fingerprint`。
 
 WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读取首帧 JSON，通过首帧 `authorization` 或握手 `Authorization` Header 完成认证。`ws://` / `wss://` 目标会执行上游 WebSocket 握手并使用首帧 `headers` 与 `payload`；`http://` / `https://` 目标保持 raw TCP 转发。`wss://` 上游握手支持通过当前出口应用请求级 TLS 指纹。
@@ -289,6 +290,7 @@ POST /proxy
   → resolveEgress()
   → pool.SelectEgress()
   → [HTTP/1.1 WrapTransport 或 HTTP/2 指纹 transport]
+  → 可选跟随 redirect（受 proxy.max_redirects 限制）
   → http.Client.Do()
   → 返回目标响应
 

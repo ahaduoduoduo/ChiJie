@@ -49,11 +49,15 @@ func TestParseProxySettingsDefaultsResponseHeaderTimeout(t *testing.T) {
 	if settings.TotalTimeout != 30*time.Second {
 		t.Fatalf("total timeout = %s, want 30s", settings.TotalTimeout)
 	}
+	if settings.MaxRedirects != 5 {
+		t.Fatalf("max redirects = %d, want 5", settings.MaxRedirects)
+	}
 }
 
 func TestParseProxySettingsAcceptsTimeouts(t *testing.T) {
 	settings, err := ParseProxySettings(&ProxySettingsConfig{
 		MaxAttempts:           2,
+		MaxRedirects:          4,
 		ResponseHeaderTimeout: "750ms",
 		TotalTimeout:          "45s",
 	})
@@ -65,6 +69,9 @@ func TestParseProxySettingsAcceptsTimeouts(t *testing.T) {
 	}
 	if settings.TotalTimeout != 45*time.Second {
 		t.Fatalf("total timeout = %s, want 45s", settings.TotalTimeout)
+	}
+	if settings.MaxRedirects != 4 {
+		t.Fatalf("max redirects = %d, want 4", settings.MaxRedirects)
 	}
 }
 
@@ -89,6 +96,13 @@ func TestParseProxySettingsRejectsInvalidTotalTimeout(t *testing.T) {
 	_, err := ParseProxySettings(&ProxySettingsConfig{TotalTimeout: "0s"})
 	if err == nil {
 		t.Fatalf("expected invalid total timeout error")
+	}
+}
+
+func TestParseProxySettingsRejectsInvalidMaxRedirects(t *testing.T) {
+	_, err := ParseProxySettings(&ProxySettingsConfig{MaxRedirects: 51})
+	if err == nil {
+		t.Fatalf("expected invalid max redirects error")
 	}
 }
 
@@ -175,6 +189,180 @@ func TestHandleProxyForwardsSetCookieHeaders(t *testing.T) {
 	want := []string{"session=abc; Path=/; HttpOnly", "pref=dark; Path=/"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("set-cookie headers: got %v want %v", got, want)
+	}
+}
+
+func TestHandleProxyDoesNotFollowRedirectsByDefault(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			http.Redirect(w, r, "/final", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("final"))
+	}))
+	defer target.Close()
+
+	jwtSecret := "jwt-secret"
+	s := &Server{
+		auth:                NewAuth(jwtSecret),
+		allowPrivateTargets: true,
+		proxySettings:       DefaultProxySettings(),
+	}
+	gateway := httptest.NewServer(http.HandlerFunc(s.handleProxy))
+	defer gateway.Close()
+
+	body, err := json.Marshal(ProxyRequest{URL: target.URL + "/start", Method: http.MethodGet})
+	if err != nil {
+		t.Fatalf("marshal proxy request: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, gateway.URL, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("create proxy request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+signedProxyToken(t, jwtSecret))
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("proxy request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want 302", resp.StatusCode)
+	}
+	if got, want := resp.Header.Get("Location"), "/final"; got != want {
+		t.Fatalf("location = %q, want %q", got, want)
+	}
+	if got := resp.Header.Get(chijieRedirectCountHeader); got != "" {
+		t.Fatalf("redirect count header should be empty, got %q", got)
+	}
+}
+
+func TestHandleProxyFollowsRedirectsWhenRequested(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			http.Redirect(w, r, "/final", http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("final"))
+	}))
+	defer target.Close()
+
+	jwtSecret := "jwt-secret"
+	s := &Server{
+		auth:                NewAuth(jwtSecret),
+		allowPrivateTargets: true,
+		proxySettings:       DefaultProxySettings(),
+	}
+	gateway := httptest.NewServer(http.HandlerFunc(s.handleProxy))
+	defer gateway.Close()
+
+	body, err := json.Marshal(ProxyRequest{URL: target.URL + "/start", Method: http.MethodGet, FollowRedirects: true})
+	if err != nil {
+		t.Fatalf("marshal proxy request: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, gateway.URL, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("create proxy request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+signedProxyToken(t, jwtSecret))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("proxy request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK || string(respBody) != "final" {
+		t.Fatalf("unexpected response: status=%d body=%q", resp.StatusCode, respBody)
+	}
+	if got, want := resp.Header.Get(chijieFinalURLHeader), target.URL+"/final"; got != want {
+		t.Fatalf("final url header = %q, want %q", got, want)
+	}
+	if got := resp.Header.Get(chijieRedirectCountHeader); got != "1" {
+		t.Fatalf("redirect count header = %q, want 1", got)
+	}
+	var redirects []proxyRedirect
+	if err := json.Unmarshal([]byte(resp.Header.Get(chijieRedirectsHeader)), &redirects); err != nil {
+		t.Fatalf("decode redirects header: %v", err)
+	}
+	if len(redirects) != 1 || redirects[0].StatusCode != http.StatusFound || redirects[0].ToURL != target.URL+"/final" {
+		t.Fatalf("unexpected redirects: %#v", redirects)
+	}
+}
+
+func TestHandleProxyStopsAtConfiguredMaxRedirects(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start":
+			http.Redirect(w, r, "/middle", http.StatusFound)
+		case "/middle":
+			http.Redirect(w, r, "/final", http.StatusFound)
+		default:
+			_, _ = w.Write([]byte("final"))
+		}
+	}))
+	defer target.Close()
+
+	settings := DefaultProxySettings()
+	settings.MaxRedirects = 1
+	jwtSecret := "jwt-secret"
+	s := &Server{
+		auth:                NewAuth(jwtSecret),
+		allowPrivateTargets: true,
+		proxySettings:       settings,
+	}
+	gateway := httptest.NewServer(http.HandlerFunc(s.handleProxy))
+	defer gateway.Close()
+
+	body, err := json.Marshal(ProxyRequest{URL: target.URL + "/start", Method: http.MethodGet, FollowRedirects: true})
+	if err != nil {
+		t.Fatalf("marshal proxy request: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, gateway.URL, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("create proxy request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+signedProxyToken(t, jwtSecret))
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("proxy request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want 302", resp.StatusCode)
+	}
+	if got, want := resp.Header.Get(chijieFinalURLHeader), target.URL+"/middle"; got != want {
+		t.Fatalf("final url header = %q, want %q", got, want)
+	}
+	if got := resp.Header.Get(chijieRedirectCountHeader); got != "1" {
+		t.Fatalf("redirect count header = %q, want 1", got)
+	}
+	if got := resp.Header.Get(chijieRedirectLimitReachedHeader); got != "true" {
+		t.Fatalf("redirect limit header = %q, want true", got)
+	}
+	if got, want := resp.Header.Get("Location"), "/final"; got != want {
+		t.Fatalf("location = %q, want %q", got, want)
 	}
 }
 
@@ -522,6 +710,52 @@ func TestDoProxyWithRetryDoesNotRetryResponseStatus(t *testing.T) {
 	}
 	if secondAttempts != 0 {
 		t.Fatalf("second candidate should not be called, got %d attempts", secondAttempts)
+	}
+}
+
+func TestDoProxyWithRetryDoesNotRetryBlockedRedirectTarget(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/blocked", http.StatusFound)
+	}))
+	defer target.Close()
+
+	var secondAttempts int
+	direct := &testDialer{
+		name: "direct",
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+	}
+	unused := &testDialer{
+		name: "unused",
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			secondAttempts++
+			return nil, errors.New("should not be called")
+		},
+	}
+	route := &egressRoute{
+		Region:   "US",
+		Group:    "US",
+		Strategy: "least-latency",
+		Choices: []*pool.EgressChoice{
+			{Dialer: direct, PoolName: "pool", NodeName: "direct", Source: "static", Region: "US", Group: "US"},
+			{Dialer: unused, PoolName: "pool", NodeName: "unused", Source: "static", Region: "US", Group: "US"},
+		},
+	}
+
+	_, _, err := (&Server{proxySettings: DefaultProxySettings()}).doProxyWithRetry(context.Background(), &ProxyRequest{
+		URL:             target.URL,
+		Method:          http.MethodGet,
+		FollowRedirects: true,
+	}, route)
+	if err == nil {
+		t.Fatalf("expected blocked redirect target error")
+	}
+	if !strings.Contains(err.Error(), "target address is in a blocked range") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if secondAttempts != 0 {
+		t.Fatalf("blocked redirect target should not retry another candidate, got %d attempts", secondAttempts)
 	}
 }
 

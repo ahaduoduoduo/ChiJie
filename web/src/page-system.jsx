@@ -17,6 +17,7 @@ function PageSystem({ state, dispatch }) {
   });
   const [proxyForm, setProxyForm] = React.useState({
     max_attempts: 5,
+    max_redirects: 5,
     template_fallback_after_attempts: true,
     response_header_timeout: "3s",
     total_timeout: "30s",
@@ -47,11 +48,12 @@ function PageSystem({ state, dispatch }) {
     if (proxyDirty) return;
     setProxyForm({
       max_attempts: proxy.max_attempts || 5,
+      max_redirects: proxy.max_redirects || 5,
       template_fallback_after_attempts: proxy.template_fallback_after_attempts !== false,
       response_header_timeout: proxy.response_header_timeout || "3s",
       total_timeout: proxy.total_timeout || proxy.request_timeout || "30s",
     });
-  }, [proxy.max_attempts, proxy.template_fallback_after_attempts, proxy.response_header_timeout, proxy.total_timeout, proxy.request_timeout, proxyDirty]);
+  }, [proxy.max_attempts, proxy.max_redirects, proxy.template_fallback_after_attempts, proxy.response_header_timeout, proxy.total_timeout, proxy.request_timeout, proxyDirty]);
 
   const setHealthField = (key, value) => {
     setHealthDirty(true);
@@ -115,6 +117,7 @@ function PageSystem({ state, dispatch }) {
     try {
       const result = await dispatch({ type: "updateProxySettings", config: {
         max_attempts: Number(proxyForm.max_attempts || 0),
+        max_redirects: Number(proxyForm.max_redirects || 0),
         template_fallback_after_attempts: !!proxyForm.template_fallback_after_attempts,
         response_header_timeout: proxyForm.response_header_timeout.trim(),
         total_timeout: proxyForm.total_timeout.trim(),
@@ -170,6 +173,9 @@ function PageSystem({ state, dispatch }) {
             <div className="field"><label className="field-label">Max node attempts</label>
               <input className="input mono" type="number" min="1" max="50" value={proxyForm.max_attempts}
                 onChange={e => setProxyField("max_attempts", e.target.value)} placeholder="5"/></div>
+            <div className="field"><label className="field-label">Max redirects</label>
+              <input className="input mono" type="number" min="1" max="50" value={proxyForm.max_redirects}
+                onChange={e => setProxyField("max_redirects", e.target.value)} placeholder="5"/></div>
             <div className="field"><label className="field-label">Response header timeout</label>
               <input className="input mono" value={proxyForm.response_header_timeout}
                 onChange={e => setProxyField("response_header_timeout", e.target.value)} placeholder="3s"/></div>
