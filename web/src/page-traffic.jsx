@@ -166,7 +166,7 @@ function TrafficRow({ row, openDetail, expanded, toggleExpanded, child }) {
         {row.url}
         {canExpand && <span className="muted-2" style={{marginLeft:8, fontSize:10}}>merged failures</span>}
       </td>
-      <td><RegionPill code={row.group} residential={row.residential} premium={row.premium}/></td>
+      <td><RegionPill code={row.group} residential={row.residential}/></td>
       <td className="mono" style={{fontSize:11.5}}>
         <div>{row.pool}{row.template && <span className="muted-2" style={{marginLeft:6, fontSize:10}}>tpl</span>}</div>
         <div className="muted-2 truncate" style={{maxWidth:180, fontSize:10.5, marginTop:2}}>{row.node}</div>

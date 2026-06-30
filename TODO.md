@@ -463,7 +463,7 @@
 日期：2026-07-01
 
 - [x] 节点、订阅池和订阅节点标签支持 `premium` 高端标识
-- [x] `/proxy` 和 `/tunnel` 支持 `egress.premium=true`，未指定地区时自动选择任意高端非直连出口
-- [x] 地区组支持 `US-PREM`、`US-RES-PREM` 和 `ANY-PREM`
+- [x] `/proxy` 和 `/tunnel` 支持 `egress.premium=true`，未指定地区时自动选择任意非直连出口并优先尝试高端节点
+- [x] 地区组不按高端拆分，高端只作为节点标记和选择偏好
 - [x] Admin Egress 和 Subscriptions 页面支持查看、筛选和编辑高端标识
 - [x] README、DETAILS、`docs/premium-egress.md`、参数驱动文档和订阅路由文档补充高端出口说明

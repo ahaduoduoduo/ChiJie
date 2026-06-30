@@ -1,8 +1,8 @@
 // Egress — region groups + node table
-const { Modal, Drawer, Toggle, Seg, RegionPill, StatusDot, LatencyBar, useToast } = window.UI;
+const { Modal, Drawer, Toggle, Seg, RegionPill, PremiumDot, StatusDot, LatencyBar, useToast } = window.UI;
 
 function nodeGroupCode(node) {
-  return window.PG.egressGroupCode(node.region, node.residential, node.premium);
+  return window.PG.egressGroupCode(node.region, node.residential);
 }
 
 function PageEgress({ state, dispatch }) {
@@ -17,9 +17,10 @@ function PageEgress({ state, dispatch }) {
 
   const realPools = pools.filter(p => p.source === "static" || p.source === "subscription");
   const allNodes = realPools.flatMap(p => (p.nodes || []).map(n => ({ ...n, pool: p.name, poolSource: p.source })));
+  const premiumGroupCodes = new Set(allNodes.filter(n => n.premium).map(nodeGroupCode));
 
   const filtered = allNodes.filter(n => {
-    if (filter === "normal" && (n.residential || n.premium)) return false;
+    if (filter === "normal" && n.residential) return false;
     if (filter === "residential" && !n.residential) return false;
     if (filter === "premium" && !n.premium) return false;
     if (groupFilter) {
@@ -34,9 +35,9 @@ function PageEgress({ state, dispatch }) {
   });
 
   const visibleGroups = regionGroups.filter(g => {
-    if (filter === "normal" && (g.residential || g.premium)) return false;
+    if (filter === "normal" && g.residential) return false;
     if (filter === "residential" && !g.residential) return false;
-    if (filter === "premium" && !g.premium) return false;
+    if (filter === "premium" && !premiumGroupCodes.has(g.code)) return false;
     return true;
   });
 
@@ -81,7 +82,7 @@ function PageEgress({ state, dispatch }) {
                   position:"relative",
                 }}>
                 <div className="row" style={{justifyContent:"space-between"}}>
-                  <RegionPill code={g.code} residential={g.residential} premium={g.premium}/>
+                  <RegionPill code={g.code} residential={g.residential}/>
                   {g.templateBackup && <span style={{fontSize:10, color:"var(--fg-3)"}} className="mono">tpl</span>}
                 </div>
                 <div style={{marginTop:14, fontSize:22, fontWeight:400, letterSpacing:"-0.02em", fontFamily:"'JetBrains Mono', monospace", lineHeight:1}}>
@@ -128,14 +129,17 @@ function PageEgress({ state, dispatch }) {
                   <Toggle on={n.enabled} onChange={() => {}}/>
                 </td>
                 <td>
-                  <div className="strong truncate" style={{maxWidth:280, fontWeight:450}}>{n.name}</div>
+                  <div className="row" style={{maxWidth:280, gap:6}}>
+                    <div className="strong truncate" style={{fontWeight:450}}>{n.name}</div>
+                    {n.premium && <PremiumDot/>}
+                  </div>
                   <div className="muted-2 mono" style={{fontSize:10.5, marginTop:2}}>{n.server || "—"}{n.port ? `:${n.port}` : ""}</div>
                 </td>
                 <td>
                   <div className="mono" style={{fontSize:12}}>{n.pool}</div>
                   <div className="muted-2" style={{fontSize:10.5, marginTop:2}}>{n.poolSource}</div>
                 </td>
-                <td><RegionPill code={nodeGroupCode(n)} residential={n.residential} premium={n.premium}/></td>
+                <td><RegionPill code={nodeGroupCode(n)} residential={n.residential}/></td>
                 <td className="mono muted">{n.type}</td>
                 <td><LatencyBar ms={n.latency}/></td>
                 <td><StatusDot alive={n.alive} enabled={n.enabled} fail={n.fail_count}/></td>
@@ -160,10 +164,10 @@ function PageEgress({ state, dispatch }) {
         {drawerNode && (
           <>
             <div className="row" style={{gap:8, marginBottom:24, flexWrap:"wrap"}}>
-              <RegionPill code={nodeGroupCode(drawerNode)} residential={drawerNode.residential} premium={drawerNode.premium}/>
+              <RegionPill code={nodeGroupCode(drawerNode)} residential={drawerNode.residential}/>
               <StatusDot alive={drawerNode.alive} enabled={drawerNode.enabled} fail={drawerNode.fail_count}/>
               <span className="pill mono">{drawerNode.type}</span>
-              {drawerNode.premium && <span className="pill premium mono">premium</span>}
+              {drawerNode.premium && <PremiumDot label/>}
               {drawerNode.tags?.map(t => <span key={t} className="pill tag">{t}</span>)}
             </div>
             <div className="kv" style={{rowGap:14}}>

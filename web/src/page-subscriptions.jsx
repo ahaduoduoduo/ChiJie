@@ -1,8 +1,8 @@
 // Subscriptions
-const { Modal, Drawer, Toggle, Seg, RegionPill, useToast } = window.UI;
+const { Modal, Drawer, Toggle, Seg, RegionPill, PremiumDot, useToast } = window.UI;
 
 function subscriptionNodeGroup(node) {
-  return window.PG.egressGroupCode(node.region, node.residential, node.premium);
+  return window.PG.egressGroupCode(node.region, node.residential);
 }
 
 function PageSubscriptions({ state, dispatch }) {
@@ -40,7 +40,6 @@ function PageSubscriptions({ state, dispatch }) {
                 <div className="row gap-12 subscription-title">
                   <h3 className="mono">{s.name}</h3>
                   {s.residential && <span className="pill res">residential</span>}
-                  {s.premium && <span className="pill premium mono">premium</span>}
                   {s.try_offline && <span className="pill mono">try offline</span>}
                 </div>
                 <div className="right subscription-actions">
@@ -75,7 +74,7 @@ function PageSubscriptions({ state, dispatch }) {
                   <div className="row" style={{gap:4, flexWrap:"wrap", marginTop:10}}>
                     {groups.map(code => {
                       const node = s.nodes.find(n => subscriptionNodeGroup(n) === code) || {};
-                      return <RegionPill key={code} code={code} residential={node.residential} premium={node.premium}/>;
+                      return <RegionPill key={code} code={code} residential={node.residential}/>;
                     })}
                   </div>
                 </div>
@@ -94,6 +93,7 @@ function PageSubscriptions({ state, dispatch }) {
                   <span key={n.id} className="pill mono subscription-node-pill" style={{opacity: n.alive && n.enabled ? 1 : 0.45}}>
                     <span style={{display:"inline-block",width:5,height:5,borderRadius:"50%",background: n.alive && n.enabled ? "#fafafa" : "var(--fg-3)", boxShadow: n.alive && n.enabled ? "0 0 4px rgba(255,255,255,0.5)" : "none"}}/>
                     <span className="truncate subscription-node-name">{n.name}</span>
+                    {n.premium && <PremiumDot/>}
                   </span>
                 ))}
                 {s.nodes.length > 14 && (

@@ -334,7 +334,7 @@ func TestSelectEgressSeparatesResidentialGroups(t *testing.T) {
 	}
 }
 
-func TestSelectEgressSeparatesPremiumGroups(t *testing.T) {
+func TestSelectEgressUsesPremiumAsPreference(t *testing.T) {
 	manager := NewManager()
 	pool, err := manager.buildPool("subscription", &PoolConfig{
 		Source: "static",
@@ -346,9 +346,11 @@ func TestSelectEgressSeparatesPremiumGroups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build pool: %v", err)
 	}
+	pool.Entries[0].Latency = 20 * time.Millisecond
+	pool.Entries[1].Latency = 200 * time.Millisecond
 	manager.pools["subscription"] = pool
 
-	ordinaryChoice, err := manager.SelectEgressFor("US", "random", EgressSelector{})
+	ordinaryChoice, err := manager.SelectEgressFor("US", "least-latency", EgressSelector{})
 	if err != nil {
 		t.Fatalf("select ordinary node: %v", err)
 	}
@@ -356,11 +358,11 @@ func TestSelectEgressSeparatesPremiumGroups(t *testing.T) {
 		t.Fatalf("unexpected ordinary choice: %#v", ordinaryChoice)
 	}
 
-	premiumChoice, err := manager.SelectEgressFor("US", "random", EgressSelector{Premium: true})
+	premiumChoice, err := manager.SelectEgressFor("US", "least-latency", EgressSelector{Premium: true})
 	if err != nil {
 		t.Fatalf("select premium node: %v", err)
 	}
-	if premiumChoice.NodeName != "us-premium" || premiumChoice.Group != "US-PREM" || !premiumChoice.Premium {
+	if premiumChoice.NodeName != "us-premium" || premiumChoice.Group != "US" || !premiumChoice.Premium {
 		t.Fatalf("unexpected premium choice: %#v", premiumChoice)
 	}
 
@@ -369,11 +371,131 @@ func TestSelectEgressSeparatesPremiumGroups(t *testing.T) {
 	for _, group := range status[0].RegionGroups {
 		groups[group.Group] = group
 	}
-	if groups["US"].Premium || groups["US"].Count != 1 {
-		t.Fatalf("unexpected ordinary group: %#v", groups["US"])
+	if groups["US"].Residential || groups["US"].Count != 2 {
+		t.Fatalf("unexpected merged group: %#v", groups["US"])
 	}
-	if !groups["US-PREM"].Premium || groups["US-PREM"].Count != 1 {
-		t.Fatalf("unexpected premium group: %#v", groups["US-PREM"])
+}
+
+func TestSelectEgressFallsBackToOrdinaryWhenPremiumUnavailable(t *testing.T) {
+	manager := NewManager()
+	pool, err := manager.buildPool("subscription", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "us-ordinary", Type: "socks5", Server: "127.0.0.1", Port: 1080, Region: "US"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	manager.pools["subscription"] = pool
+
+	choice, err := manager.SelectEgressFor("US", "least-latency", EgressSelector{Premium: true})
+	if err != nil {
+		t.Fatalf("select premium fallback node: %v", err)
+	}
+	if choice.NodeName != "us-ordinary" || choice.Group != "US" || choice.Premium {
+		t.Fatalf("unexpected premium fallback choice: %#v", choice)
+	}
+}
+
+func TestSelectEgressPremiumCandidatesKeepOrdinaryFallback(t *testing.T) {
+	manager := NewManager()
+	pool, err := manager.buildPool("subscription", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "us-ordinary", Type: "socks5", Server: "127.0.0.1", Port: 1080, Region: "US"},
+			{Name: "us-premium", Type: "socks5", Server: "127.0.0.1", Port: 1081, Region: "US", Premium: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	pool.Entries[0].Latency = 20 * time.Millisecond
+	pool.Entries[1].Latency = 200 * time.Millisecond
+	manager.pools["subscription"] = pool
+
+	choices, err := manager.SelectEgressCandidatesFor("US", "least-latency", EgressSelector{Premium: true})
+	if err != nil {
+		t.Fatalf("select premium candidates: %v", err)
+	}
+	if len(choices) != 2 {
+		t.Fatalf("unexpected candidate count: %d", len(choices))
+	}
+	if choices[0].NodeName != "us-premium" || !choices[0].Premium {
+		t.Fatalf("premium candidate should be first: %#v", choices[0])
+	}
+	if choices[1].NodeName != "us-ordinary" || choices[1].Premium {
+		t.Fatalf("ordinary candidate should remain as fallback: %#v", choices[1])
+	}
+}
+
+func TestSelectEgressPremiumCandidatesAppendResidentialFallback(t *testing.T) {
+	manager := NewManager()
+	pool, err := manager.buildPool("subscription", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "us-premium", Type: "socks5", Server: "127.0.0.1", Port: 1081, Region: "US", Premium: true},
+			{Name: "us-res", Type: "socks5", Server: "127.0.0.1", Port: 1082, Region: "US", Residential: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	manager.pools["subscription"] = pool
+
+	choices, err := manager.SelectEgressCandidatesFor("US", "least-latency", EgressSelector{Premium: true})
+	if err != nil {
+		t.Fatalf("select premium candidates: %v", err)
+	}
+	if len(choices) != 2 {
+		t.Fatalf("unexpected candidate count: %d", len(choices))
+	}
+	if choices[0].NodeName != "us-premium" || !choices[0].Premium || choices[0].Residential {
+		t.Fatalf("premium normal candidate should be first: %#v", choices[0])
+	}
+	if choices[1].NodeName != "us-res" || !choices[1].Residential || choices[1].Group != "US-RES" {
+		t.Fatalf("residential fallback should remain available: %#v", choices[1])
+	}
+}
+
+func TestSelectEgressPremiumPrefersPremiumTemplateOverOrdinaryNode(t *testing.T) {
+	manager := NewManager()
+	staticPool, err := manager.buildPool("static", &PoolConfig{
+		Source: "static",
+		Nodes: []dialer.Node{
+			{Name: "us-ordinary", Type: "direct", Region: "US"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build static pool: %v", err)
+	}
+	templatePool, err := manager.buildPool("premium-template", &PoolConfig{
+		Source:           "template",
+		Type:             "direct",
+		UsernameTemplate: "country-{region}",
+		Premium:          true,
+		Priority:         10,
+	})
+	if err != nil {
+		t.Fatalf("build template pool: %v", err)
+	}
+	manager.pools["static"] = staticPool
+	manager.pools["premium-template"] = templatePool
+
+	choice, err := manager.SelectEgressFor("US", "least-latency", EgressSelector{Premium: true})
+	if err != nil {
+		t.Fatalf("select premium egress: %v", err)
+	}
+	if !choice.Template || choice.PoolName != "premium-template" || !choice.Premium || choice.Group != "US" {
+		t.Fatalf("unexpected premium template choice: %#v", choice)
+	}
+
+	choices, err := manager.SelectEgressCandidatesWithTemplateFallbackFor("US", "least-latency", EgressSelector{Premium: true})
+	if err != nil {
+		t.Fatalf("select premium egress candidates: %v", err)
+	}
+	if len(choices) < 2 || choices[0].PoolName != "premium-template" || choices[1].NodeName != "us-ordinary" {
+		t.Fatalf("unexpected premium fallback order: %#v", choices)
 	}
 }
 
@@ -860,7 +982,7 @@ func TestSelectAnyEgressSeparatesPremium(t *testing.T) {
 	if err != nil {
 		t.Fatalf("select premium any egress: %v", err)
 	}
-	if choice.NodeName != "hk-premium" || choice.Group != "ANY-PREM" || !choice.Premium {
+	if choice.NodeName != "hk-premium" || choice.Group != "ANY" || !choice.Premium {
 		t.Fatalf("unexpected premium any choice: %#v", choice)
 	}
 }

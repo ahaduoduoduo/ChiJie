@@ -126,7 +126,8 @@ type EgressChoice struct {
 	Latency      time.Duration `json:"-"`
 }
 
-// EgressSelector describes the node class requested by a proxy call.
+// EgressSelector describes the node class requested by a proxy call. Premium is
+// a preference: premium nodes are tried first, then ordinary fallback remains available.
 type EgressSelector struct {
 	Residential bool
 	Premium     bool
@@ -316,7 +317,7 @@ func (m *Manager) SelectEgress(region string, strategy string, residential bool)
 	return m.SelectEgressFor(region, strategy, EgressSelector{Residential: residential})
 }
 
-// SelectEgressFor 按地区、策略和节点类别选择出口。
+// SelectEgressFor 按地区、策略、家宽类别和高端偏好选择出口。
 func (m *Manager) SelectEgressFor(region string, strategy string, selector EgressSelector) (*EgressChoice, error) {
 	choices, err := m.SelectEgressCandidatesFor(region, strategy, selector)
 	if err != nil {
@@ -331,7 +332,7 @@ func (m *Manager) SelectEgressCandidates(region string, strategy string, residen
 	return m.SelectEgressCandidatesFor(region, strategy, EgressSelector{Residential: residential})
 }
 
-// SelectEgressCandidatesFor 返回按策略和节点类别排序后的出口候选。
+// SelectEgressCandidatesFor 返回按策略、家宽类别和高端偏好排序后的出口候选。
 func (m *Manager) SelectEgressCandidatesFor(region string, strategy string, selector EgressSelector) ([]*EgressChoice, error) {
 	region = NormalizeRegionCode(region)
 	if region == "" {
@@ -340,6 +341,7 @@ func (m *Manager) SelectEgressCandidatesFor(region string, strategy string, sele
 	strategy = NormalizeStrategy(strategy)
 
 	if choices := m.egressCandidateGroup(region, strategy, selector, false); len(choices) > 0 {
+		choices = m.appendPremiumResidentialFallback(region, strategy, selector, choices, false)
 		return choices, nil
 	}
 
@@ -369,6 +371,7 @@ func (m *Manager) SelectEgressCandidatesWithTemplateFallbackFor(region string, s
 	strategy = NormalizeStrategy(strategy)
 
 	if choices := m.egressCandidateGroup(region, strategy, selector, true); len(choices) > 0 {
+		choices = m.appendPremiumResidentialFallback(region, strategy, selector, choices, true)
 		return choices, nil
 	}
 
@@ -385,23 +388,42 @@ func (m *Manager) SelectEgressCandidatesWithTemplateFallbackFor(region string, s
 
 func (m *Manager) egressCandidateGroup(region string, strategy string, selector EgressSelector, includeTemplatesAfterEntries bool) []*EgressChoice {
 	group := EgressGroupFor(region, selector)
-	templates := func() []*EgressChoice {
-		return m.templateChoices(region, selector)
+	entries := m.orderEgressChoices(m.entryChoices(region, selector), strategy, group)
+	offlineEntries := m.orderEgressChoices(m.tryOfflineEntryChoices(region, selector), strategy, group)
+	templates := m.templateChoices(region, selector)
+
+	if selector.Premium {
+		if choices := premiumCandidateGroup(entries, offlineEntries, templates, includeTemplatesAfterEntries); len(choices) > 0 {
+			return choices
+		}
 	}
 
-	if choices := m.orderEgressChoices(m.entryChoices(region, selector), strategy, group); len(choices) > 0 {
+	if len(entries) > 0 {
 		if includeTemplatesAfterEntries {
-			return append(choices, templates()...)
+			return append(entries, templates...)
 		}
+		return entries
+	}
+	if len(offlineEntries) > 0 {
+		if includeTemplatesAfterEntries {
+			return append(offlineEntries, templates...)
+		}
+		return offlineEntries
+	}
+	return templates
+}
+
+func (m *Manager) appendPremiumResidentialFallback(region string, strategy string, selector EgressSelector, choices []*EgressChoice, includeTemplatesAfterEntries bool) []*EgressChoice {
+	if !selector.Premium || selector.Residential || len(choices) == 0 {
 		return choices
 	}
-	if choices := m.orderEgressChoices(m.tryOfflineEntryChoices(region, selector), strategy, group); len(choices) > 0 {
-		if includeTemplatesAfterEntries {
-			return append(choices, templates()...)
-		}
+	fallback := selector
+	fallback.Residential = true
+	fallbackChoices := m.egressCandidateGroup(region, strategy, fallback, includeTemplatesAfterEntries)
+	if len(fallbackChoices) == 0 {
 		return choices
 	}
-	return templates()
+	return append(choices, fallbackChoices...)
 }
 
 // SelectAnyEgress 在不指定地区时选择一个非直连出口。maxLatency 为 0 时不限制延迟。
@@ -409,7 +431,7 @@ func (m *Manager) SelectAnyEgress(strategy string, residential bool, maxLatency 
 	return m.SelectAnyEgressFor(strategy, EgressSelector{Residential: residential}, maxLatency)
 }
 
-// SelectAnyEgressFor 在不指定地区时按节点类别选择一个非直连出口。
+// SelectAnyEgressFor 在不指定地区时按家宽类别和高端偏好选择一个非直连出口。
 func (m *Manager) SelectAnyEgressFor(strategy string, selector EgressSelector, maxLatency time.Duration) (*EgressChoice, error) {
 	choices, err := m.SelectAnyEgressCandidatesFor(strategy, selector, maxLatency)
 	if err != nil {
@@ -423,11 +445,11 @@ func (m *Manager) SelectAnyEgressCandidates(strategy string, residential bool, m
 	return m.SelectAnyEgressCandidatesFor(strategy, EgressSelector{Residential: residential}, maxLatency)
 }
 
-// SelectAnyEgressCandidatesFor 在不指定地区时返回按策略和节点类别排序后的非直连候选。
+// SelectAnyEgressCandidatesFor 在不指定地区时返回按策略、家宽类别和高端偏好排序后的非直连候选。
 func (m *Manager) SelectAnyEgressCandidatesFor(strategy string, selector EgressSelector, maxLatency time.Duration) ([]*EgressChoice, error) {
 	strategy = NormalizeStrategy(strategy)
 	group := AnyEgressGroupFor(selector)
-	if choices := m.orderEgressChoices(m.anyEntryChoices(selector, maxLatency), strategy, group); len(choices) > 0 {
+	if choices := prioritizePremiumChoices(m.orderEgressChoices(m.anyEntryChoices(selector, maxLatency), strategy, group), selector.Premium); len(choices) > 0 {
 		return choices, nil
 	}
 
@@ -465,8 +487,8 @@ func (m *Manager) entryChoices(region string, selector EgressSelector) []*Egress
 				Source:      pool.Config.Source,
 				Region:      region,
 				Group:       EgressGroupFor(region, selector),
-				Residential: selector.Residential,
-				Premium:     selector.Premium,
+				Residential: entry.Residential,
+				Premium:     entry.Premium,
 				Latency:     entry.Latency,
 			})
 		}
@@ -512,8 +534,8 @@ func (m *Manager) tryOfflineEntryChoices(region string, selector EgressSelector)
 					Source:      pool.Config.Source,
 					Region:      region,
 					Group:       EgressGroupFor(region, selector),
-					Residential: selector.Residential,
-					Premium:     selector.Premium,
+					Residential: entry.Residential,
+					Premium:     entry.Premium,
 					Latency:     entry.Latency,
 				}
 			}
@@ -561,8 +583,8 @@ func (m *Manager) anyEntryChoices(selector EgressSelector, maxLatency time.Durat
 				Source:      pool.Config.Source,
 				Region:      entry.Region,
 				Group:       group,
-				Residential: selector.Residential,
-				Premium:     selector.Premium,
+				Residential: entry.Residential,
+				Premium:     entry.Premium,
 				Latency:     entry.Latency,
 			})
 		}
@@ -623,7 +645,7 @@ func (m *Manager) templateChoices(region string, selector EgressSelector) []*Egr
 			Region:       region,
 			Group:        EgressGroupFor(region, selector),
 			Residential:  selector.Residential,
-			Premium:      selector.Premium,
+			Premium:      pool.Config.Premium,
 			Template:     true,
 			Priority:     pool.Config.Priority,
 			Endpoint:     endpoint,
@@ -631,6 +653,9 @@ func (m *Manager) templateChoices(region string, selector EgressSelector) []*Egr
 		})
 	}
 	sort.Slice(choices, func(i, j int) bool {
+		if selector.Premium && choices[i].Premium != choices[j].Premium {
+			return choices[i].Premium
+		}
 		if choices[i].Priority != choices[j].Priority {
 			return choices[i].Priority > choices[j].Priority
 		}
@@ -702,29 +727,23 @@ func TemplateCoversResidential(cfg *PoolConfig, residential bool) bool {
 	}
 }
 
-// TemplateCoversSelector 判断模板是否服务当前普通/家宽和高端请求。
+// TemplateCoversSelector 判断模板是否服务当前普通/家宽请求。Premium 只影响优先级，不影响可用性。
 func TemplateCoversSelector(cfg *PoolConfig, selector EgressSelector) bool {
-	if cfg == nil || cfg.Premium != selector.Premium {
+	if cfg == nil {
 		return false
 	}
 	return TemplateCoversResidential(cfg, selector.Residential)
 }
 
 func entryMatchesSelector(entry *NodeEntry, selector EgressSelector) bool {
-	return entry != nil && entry.Residential == selector.Residential && entry.Premium == selector.Premium
+	return entry != nil && entry.Residential == selector.Residential
 }
 
 func noEgressChoicesError(region string, selector EgressSelector) error {
-	switch {
-	case selector.Residential && selector.Premium:
-		return fmt.Errorf("no premium residential nodes or premium residential templates available for region %s", region)
-	case selector.Premium:
-		return fmt.Errorf("no premium nodes or premium templates available for region %s", region)
-	case selector.Residential:
+	if selector.Residential {
 		return fmt.Errorf("no residential nodes or residential templates available for region %s", region)
-	default:
-		return fmt.Errorf("no nodes or templates available for region %s", region)
 	}
+	return fmt.Errorf("no nodes or templates available for region %s", region)
 }
 
 // ChijieProxyURL 返回远端 Chijie 的 /proxy HTTPS 地址。endpoint 可只填写域名。
@@ -807,6 +826,63 @@ func (m *Manager) orderEgressChoices(choices []*EgressChoice, strategy string, r
 		})
 	}
 	return ordered
+}
+
+func prioritizePremiumChoices(choices []*EgressChoice, prefer bool) []*EgressChoice {
+	if !prefer || len(choices) == 0 {
+		return choices
+	}
+	premium := make([]*EgressChoice, 0, len(choices))
+	ordinary := make([]*EgressChoice, 0, len(choices))
+	for _, choice := range choices {
+		if choice != nil && choice.Premium {
+			premium = append(premium, choice)
+		} else {
+			ordinary = append(ordinary, choice)
+		}
+	}
+	if len(premium) == 0 {
+		return choices
+	}
+	return append(premium, ordinary...)
+}
+
+func premiumCandidateGroup(entries []*EgressChoice, offlineEntries []*EgressChoice, templates []*EgressChoice, includeTemplateFallback bool) []*EgressChoice {
+	premiumEntries := filterChoicesByPremium(entries, true)
+	premiumOfflineEntries := filterChoicesByPremium(offlineEntries, true)
+	premiumTemplates := filterChoicesByPremium(templates, true)
+	if len(premiumEntries)+len(premiumOfflineEntries)+len(premiumTemplates) == 0 {
+		return nil
+	}
+
+	choices := make([]*EgressChoice, 0, len(entries)+len(offlineEntries)+len(templates))
+	switch {
+	case len(premiumEntries) > 0:
+		choices = append(choices, premiumEntries...)
+	case len(premiumOfflineEntries) > 0:
+		choices = append(choices, premiumOfflineEntries...)
+	default:
+		choices = append(choices, premiumTemplates...)
+	}
+	if len(premiumEntries) > 0 || len(premiumOfflineEntries) > 0 {
+		choices = append(choices, premiumTemplates...)
+	}
+	choices = append(choices, filterChoicesByPremium(entries, false)...)
+	choices = append(choices, filterChoicesByPremium(offlineEntries, false)...)
+	if includeTemplateFallback {
+		choices = append(choices, filterChoicesByPremium(templates, false)...)
+	}
+	return choices
+}
+
+func filterChoicesByPremium(choices []*EgressChoice, premium bool) []*EgressChoice {
+	filtered := make([]*EgressChoice, 0, len(choices))
+	for _, choice := range choices {
+		if choice != nil && choice.Premium == premium {
+			filtered = append(filtered, choice)
+		}
+	}
+	return filtered
 }
 
 // GetPool 获取指定池
@@ -1022,7 +1098,6 @@ type RegionGroupStatus struct {
 	Region      string `json:"region"`
 	Name        string `json:"name"`
 	Residential bool   `json:"residential"`
-	Premium     bool   `json:"premium,omitempty"`
 	Count       int    `json:"count"`
 	Online      int    `json:"online"`
 }
@@ -1065,7 +1140,6 @@ func (m *Manager) GetPoolStatus() []PoolStatus {
 		ps.Error = pool.Error
 		groupMap := make(map[string]*RegionGroupStatus)
 		for _, e := range pool.Entries {
-			selector := EgressSelector{Residential: e.Residential, Premium: e.Premium}
 			ns := NodeStatus{
 				Name:        e.Node.Name,
 				Type:        e.Node.Type,
@@ -1075,7 +1149,7 @@ func (m *Manager) GetPoolStatus() []PoolStatus {
 				Password:    e.Node.Password,
 				Extra:       e.Node.Extra,
 				Region:      e.Region,
-				RegionGroup: EgressGroupFor(e.Region, selector),
+				RegionGroup: EgressGroup(e.Region, e.Residential),
 				Residential: e.Residential,
 				Premium:     e.Premium,
 				Alias:       e.Alias,
@@ -1088,15 +1162,14 @@ func (m *Manager) GetPoolStatus() []PoolStatus {
 				ns.Latency = e.Latency.String()
 			}
 			ps.Nodes = append(ps.Nodes, ns)
-			groupRegion := EgressGroupFor(e.Region, selector)
+			groupRegion := EgressGroup(e.Region, e.Residential)
 			group := groupMap[groupRegion]
 			if group == nil {
 				group = &RegionGroupStatus{
 					Group:       groupRegion,
 					Region:      e.Region,
-					Name:        groupNameForRegion(e.Region, selector, pool.Config),
+					Name:        groupNameForRegion(e.Region, EgressSelector{Residential: e.Residential}, pool.Config),
 					Residential: e.Residential,
-					Premium:     e.Premium,
 				}
 				groupMap[groupRegion] = group
 			}
@@ -1113,7 +1186,7 @@ func (m *Manager) GetPoolStatus() []PoolStatus {
 			if normalized == "" {
 				continue
 			}
-			selector := EgressSelector{Residential: pool.Config.Residential, Premium: pool.Config.Premium}
+			selector := EgressSelector{Residential: pool.Config.Residential}
 			groupCode := EgressGroupFor(normalized, selector)
 			if groupMap[groupCode] == nil {
 				groupMap[groupCode] = &RegionGroupStatus{
@@ -1121,7 +1194,6 @@ func (m *Manager) GetPoolStatus() []PoolStatus {
 					Region:      normalized,
 					Name:        groupName,
 					Residential: pool.Config.Residential,
-					Premium:     pool.Config.Premium,
 				}
 			}
 		}
@@ -1320,23 +1392,16 @@ func EgressGroup(region string, residential bool) string {
 	return EgressGroupFor(region, EgressSelector{Residential: residential})
 }
 
-// EgressGroupFor 返回包含家宽和高端类别的地区组代码。
+// EgressGroupFor 返回地区组代码。Premium 不改变地区组，只作为节点偏好。
 func EgressGroupFor(region string, selector EgressSelector) string {
 	region = NormalizeRegionCode(region)
 	if region == "" {
 		return "DIRECT"
 	}
-	suffixes := make([]string, 0, 2)
 	if selector.Residential {
-		suffixes = append(suffixes, "RES")
+		return region + "-RES"
 	}
-	if selector.Premium {
-		suffixes = append(suffixes, "PREM")
-	}
-	if len(suffixes) == 0 {
-		return region
-	}
-	return region + "-" + strings.Join(suffixes, "-")
+	return region
 }
 
 // AnyEgressGroup 返回地区无关出口组代码。
@@ -1344,19 +1409,12 @@ func AnyEgressGroup(residential bool) string {
 	return AnyEgressGroupFor(EgressSelector{Residential: residential})
 }
 
-// AnyEgressGroupFor 返回包含家宽和高端类别的地区无关出口组代码。
+// AnyEgressGroupFor 返回地区无关出口组代码。Premium 不改变组名。
 func AnyEgressGroupFor(selector EgressSelector) string {
-	suffixes := make([]string, 0, 2)
 	if selector.Residential {
-		suffixes = append(suffixes, "RES")
+		return "ANY-RES"
 	}
-	if selector.Premium {
-		suffixes = append(suffixes, "PREM")
-	}
-	if len(suffixes) == 0 {
-		return "ANY"
-	}
-	return "ANY-" + strings.Join(suffixes, "-")
+	return "ANY"
 }
 
 func regionForNode(node *dialer.Node, cfg *PoolConfig) string {
@@ -1426,25 +1484,13 @@ func groupNameForRegion(region string, selector EgressSelector, cfg *PoolConfig)
 		}
 	}
 	if name := regionCodeToName[normalized]; name != "" {
-		if selector.Residential && selector.Premium {
-			return name + "-RES-PREM"
-		}
 		if selector.Residential {
 			return name + "-RES"
 		}
-		if selector.Premium {
-			return name + "-PREM"
-		}
 		return name
-	}
-	if selector.Residential && selector.Premium {
-		return normalized + "-RES-PREM"
 	}
 	if selector.Residential {
 		return normalized + "-RES"
-	}
-	if selector.Premium {
-		return normalized + "-PREM"
 	}
 	return normalized
 }

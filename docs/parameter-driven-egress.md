@@ -51,7 +51,7 @@ Authorization: Bearer <proxy_token>
 - `max_latency_ms`：任意地区出口的延迟上限，依据最近健康检查延迟过滤；`0` 表示不限制。
 - `strategy`：节点选择策略，支持 `least-latency`、`round-robin`、`random`。
 - `residential`：是否使用家宽出口。
-- `premium`：是否使用高端出口；用于访问开启 Cloudflare 防护、普通节点容易被阻挡的网站。
+- `premium`：是否优先使用高端出口；用于访问开启 Cloudflare 防护、普通节点容易被阻挡的网站。
 - `tls_fingerprint`：TLS 指纹字符串，可以是后台预设名、uTLS 预设名、JA3 raw、JA4 raw，或 YAML/JSON 格式的 `FingerprintConfig` 字符串。配置字符串可包含 Akamai raw、TLS 明细、HTTP/2 明细，也可直接使用检测站复制出的 JSON。
 
 建议请求结构：
@@ -126,11 +126,11 @@ Authorization: Bearer <proxy_token>
 7. `region` 不为空时，将地区码规范化为大写二字母地区码。
 8. `residential=false` 时查找普通地区组，例如 `US`。
 9. `residential=true` 时查找家宽地区组，例如 `US-RES`。
-10. `premium=true` 时查找高端地区组，例如 `US-PREM`；与家宽组合时查找 `US-RES-PREM`。
+10. `premium=true` 时优先选择高端节点和高端模板；高端不可用或尝试失败时继续使用原有候选和 fallback。
 11. 地区组内存在可用静态节点或订阅节点时，按 `strategy` 选择具体节点。
 12. 开启 `proxy.template_fallback_after_attempts` 时，可用静态/订阅节点按 `proxy.max_attempts` 尝试失败后继续查找同类型模板节点；地区组内没有可用静态节点或订阅节点时也会查找同类型模板节点。
 13. 找到模板节点后，按 `priority` 降序尝试；普通代理模板用请求地区码生成实际代理出口，Chijie 模板把原 `/proxy` 请求转发给远端 Chijie。
-14. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板；高端请求只在高端集合内降级。
+14. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板；高端请求也保留这类原有 fallback。
 15. 没有可用节点也没有可用模板时，返回明确错误。
 16. 按 `proxy.response_header_timeout` 等待目标响应头，默认单个出口等待 `3s`；按 `proxy.total_timeout` 限制完整请求总时长，默认 `30s`；`follow_redirects=true` 时按 `proxy.max_redirects` 限制最大跳转次数，默认 `5`；并记录选择结果、状态码、耗时、错误和流量。
 17. 如果非直连出口在建立连接或等待响应头阶段失败，继续换下一个候选出口；失败的静态/订阅节点立即标记为 `Alive=false`，源站已经返回 HTTP 状态码时不重试。
@@ -155,22 +155,13 @@ Authorization: Bearer <proxy_token>
 - `TW-RES`
 - `SG-RES`
 
-高端节点进入高端地区组：
-
-- `US-PREM`
-- `HK-PREM`
-- `JP-PREM`
-
-高端家宽节点进入组合地区组：
-
-- `US-RES-PREM`
-- `HK-RES-PREM`
+高端不创建单独地区组。高端普通节点仍进入 `US`、`HK`、`JP`，高端家宽节点仍进入 `US-RES`、`HK-RES`、`JP-RES`。
 
 地区组只由静态节点和订阅节点实际生成。模板节点默认不展开所有可能地区，因为模板节点支持任意二字母地区码，前端不应该显示无限地区列表。
 
 前端展示建议：
 
-- 地区组列表展示已有普通组、家宽组、高端组和高端家宽组。
+- 地区组列表展示已有普通组和家宽组。
 - 每个组展示在线节点数、总节点数、最低延迟、来源数量、是否有模板兜底。
 - 模板覆盖能力单独展示为“普通模板可用”和“家宽模板可用”。
 - 冷门地区请求不需要提前出现在地区组列表中，只要有对应类型模板即可处理。

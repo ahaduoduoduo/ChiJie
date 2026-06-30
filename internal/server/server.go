@@ -603,7 +603,7 @@ func proxyAttemptRoutes(route *egressRoute, settings ProxySettings) []*egressRou
 			continue
 		}
 		if choice.Template {
-			if hasNodeChoice && !settings.TemplateFallbackAfterAttempts {
+			if hasNodeChoice && !settings.TemplateFallbackAfterAttempts && !(route.Premium && choice.Premium) {
 				continue
 			}
 		} else {
@@ -617,7 +617,6 @@ func proxyAttemptRoutes(route *egressRoute, settings ProxySettings) []*egressRou
 		attemptRoute.Region = choice.Region
 		attemptRoute.Group = choice.Group
 		attemptRoute.Residential = choice.Residential
-		attemptRoute.Premium = choice.Premium
 		routes = append(routes, &attemptRoute)
 	}
 	return routes
@@ -972,10 +971,10 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 	}
 	choice := choices[0]
 	routeResidential := choice.Residential
-	routePremium := choice.Premium
+	routePremium := selector.Premium
 	routeGroup := choice.Group
 	if routeGroup == "" {
-		routeGroup = pool.EgressGroupFor(region, pool.EgressSelector{Residential: routeResidential, Premium: routePremium})
+		routeGroup = pool.EgressGroupFor(region, pool.EgressSelector{Residential: routeResidential})
 	}
 
 	return &egressRoute{
@@ -993,9 +992,16 @@ func (s *Server) resolveEgress(options EgressOptions) (*egressRoute, error) {
 func (s *Server) selectAnyEgressCandidates(strategy string, selector pool.EgressSelector, maxLatency time.Duration) ([]*pool.EgressChoice, pool.EgressSelector, error) {
 	choices, err := s.poolManager.SelectAnyEgressCandidatesFor(strategy, selector, maxLatency)
 	if err == nil {
+		if selector.Premium && !selector.Residential {
+			fallback := selector
+			fallback.Residential = true
+			if fallbackChoices, fallbackErr := s.poolManager.SelectAnyEgressCandidatesFor(strategy, fallback, maxLatency); fallbackErr == nil {
+				choices = append(choices, fallbackChoices...)
+			}
+		}
 		return choices, selector, nil
 	}
-	if selector.Premium && !selector.Residential {
+	if !selector.Residential {
 		fallback := selector
 		fallback.Residential = true
 		if fallbackChoices, fallbackErr := s.poolManager.SelectAnyEgressCandidatesFor(strategy, fallback, maxLatency); fallbackErr == nil {

@@ -8,11 +8,11 @@
 - `WS /tunnel`：通过首帧 JSON 声明目标和出口参数，支持 raw TCP 转发和上游 WebSocket 握手转发
 - 出口协议：直连、SOCKS5、HTTP Proxy、Shadowsocks、VMess、VLESS、Trojan、Hysteria2
 - 节点池管理：静态节点、订阅节点、模板节点和直连池
-- 地区组：普通地区组使用 `US` / `HK` / `JP`，家宽地区组使用 `US-RES` / `HK-RES`，高端地区组使用 `US-PREM`
+- 地区组：普通地区组使用 `US` / `HK` / `JP`，家宽地区组使用 `US-RES` / `HK-RES`
 - 出口策略：`random`、`round-robin`、`least-latency`
 - 模板节点：支持 Bright Data 这类按地区动态生成账号的出口，可作为地区兜底或冷门地区动态出口
 - 家宽模板：通过 `residential: true` 单独声明，服务家宽请求；普通请求没有同地区普通出口时可降级使用同地区家宽出口
-- 高端出口：节点或订阅池可配置 `premium: true`，请求带 `egress.premium=true` 时只使用高端节点，适合访问开启 Cloudflare 防护的网站
+- 高端出口：节点或订阅池可配置 `premium: true`，请求带 `egress.premium=true` 时优先使用高端节点，高端不可用时回到原有候选和 fallback
 - 健康检查：后台探测节点连通性和延迟，供可用性判断和 `least-latency` 使用
 - TLS 指纹：支持内置预设、自定义 JA3、配置文件指纹名称和请求级字符串
 - Admin API：管理节点池、订阅刷新、TLS 指纹、流量日志和系统重载
@@ -187,7 +187,7 @@ Proxy token 是无状态 JWT，只在生成弹窗中显示一次；后台不保�
 - `egress.max_latency_ms`：配合 `egress.any` 使用，限制候选出口最近健康检查延迟上限；`0` 表示不限制。
 - `egress.strategy`：`random`、`round-robin`、`least-latency`，缺省为 `random`。
 - `egress.residential`：是否使用家宽出口。
-- `egress.premium`：是否使用高端出口；未指定 `region` 时会自动选择任意高端非直连出口。
+- `egress.premium`：是否优先使用高端出口；未指定 `region` 时会自动选择任意非直连出口并优先尝试高端节点。
 - `egress.tls_fingerprint`：TLS 指纹名称、预设名、JA3 raw、JA4 raw、Akamai raw 或可解析的配置字符串；测试结果以远端返回的真实指纹信息为准。
 
 响应使用目标服务器的 status code、`Content-Type` 和响应体。目标服务器返回的 `Set-Cookie` 会逐条写入 `/proxy` 响应头；网关不保存 cookie、不自动生成下一次请求的 `Cookie`，也不改写 cookie 的 `Domain` / `Path`。目标服务器返回 3xx 且 `follow_redirects=false` 时，网关保留 3xx 状态并转发 `Location` 响应头。
@@ -203,11 +203,11 @@ Proxy token 是无状态 JWT，只在生成弹窗中显示一次；后台不保�
 3. `region` 不为空时标准化为大写二字母地区码。
 4. `residential=false` 查找普通地区组，例如 `US`。
 5. `residential=true` 查找家宽地区组，例如 `US-RES`。
-6. `premium=true` 时只查找高端地区组，例如 `US-PREM` 或 `US-RES-PREM`。
+6. `premium=true` 时优先选择高端节点和高端模板；高端不可用或尝试失败时继续使用原有普通、家宽或模板 fallback。
 7. 地区组内存在可用静态节点或订阅节点时，按 `strategy` 选择节点。
 8. 订阅池开启 `try_offline` 且某地区只有一个离线订阅节点时，在模板 fallback 前允许该节点再尝试一次。
 9. 每个出口访问目标站点时使用 `proxy.response_header_timeout` 控制等待响应头的超时，默认 `3s`；使用 `proxy.total_timeout` 控制完整请求总时长，默认 `30s`；`follow_redirects=true` 时最多跟随 `proxy.max_redirects` 次 redirect，默认 5 次；开启 `proxy.template_fallback_after_attempts` 时，地区组内可用节点连续失败达到 `proxy.max_attempts` 后继续尝试同类型模板节点；地区组内没有可用节点时也会直接使用同类型模板节点。
-10. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板；高端请求只在高端集合内降级。
+10. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板；高端请求也保留这类原有 fallback。
 11. 没有可用节点也没有可用模板时返回错误。
 
 任意地区出口不会使用 `direct`、`type: direct` 静态节点或模板节点，因为模板节点需要明确地区码来生成代理账号。

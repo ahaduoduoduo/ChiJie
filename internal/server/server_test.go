@@ -434,6 +434,12 @@ node_pools:
         port: 1081
         region: HK
         premium: true
+      - name: us-res
+        type: socks5
+        server: 127.0.0.1
+        port: 1082
+        region: US
+        residential: true
 `)
 	if err := os.WriteFile(nodesPath, data, 0644); err != nil {
 		t.Fatalf("write nodes: %v", err)
@@ -449,8 +455,11 @@ node_pools:
 	if err != nil {
 		t.Fatalf("resolve premium egress: %v", err)
 	}
-	if route.Direct || route.Group != "ANY-PREM" || !route.Premium || route.Choice == nil || route.Choice.NodeName != "hk-premium" {
+	if route.Direct || route.Group != "ANY" || !route.Premium || route.Choice == nil || route.Choice.NodeName != "hk-premium" || !route.Choice.Premium {
 		t.Fatalf("unexpected premium route: %#v", route)
+	}
+	if len(route.Choices) != 3 || route.Choices[2].NodeName != "us-res" || !route.Choices[2].Residential {
+		t.Fatalf("expected residential fallback to remain available: %#v", route.Choices)
 	}
 }
 
@@ -462,11 +471,6 @@ node_pools:
   primary:
     source: static
     nodes:
-      - name: us-normal
-        type: socks5
-        server: 127.0.0.1
-        port: 1080
-        region: US
       - name: us-premium-res
         type: socks5
         server: 127.0.0.1
@@ -489,7 +493,7 @@ node_pools:
 	if err != nil {
 		t.Fatalf("resolve premium residential fallback egress: %v", err)
 	}
-	if route.Group != "ANY-RES-PREM" || !route.Premium || !route.Residential || route.Choice == nil || route.Choice.NodeName != "us-premium-res" {
+	if route.Group != "ANY-RES" || !route.Premium || !route.Residential || route.Choice == nil || route.Choice.NodeName != "us-premium-res" || !route.Choice.Premium {
 		t.Fatalf("unexpected premium residential fallback route: %#v", route)
 	}
 }
@@ -667,6 +671,24 @@ func TestProxyAttemptRoutesUseConfiguredNodeAttemptsBeforeTemplate(t *testing.T)
 		got = append(got, item.Choice.NodeName)
 	}
 	want := []string{"node-1", "node-2", "node-3", "node-4", "node-5", "tpl-us"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("attempt route order: got %v want %v", got, want)
+	}
+}
+
+func TestProxyAttemptRoutesKeepPremiumTemplateBeforeOrdinaryFallback(t *testing.T) {
+	choices := []*pool.EgressChoice{
+		{PoolName: "premium-tpl", NodeName: "premium-tpl-us", Source: "template", Template: true, Premium: true, Region: "US", Group: "US"},
+		{PoolName: "pool", NodeName: "node-1", Source: "static", Region: "US", Group: "US"},
+	}
+	route := &egressRoute{Region: "US", Group: "US", Premium: true, Choices: choices}
+
+	routes := proxyAttemptRoutes(route, ProxySettings{MaxAttempts: 5, TemplateFallbackAfterAttempts: false})
+	var got []string
+	for _, item := range routes {
+		got = append(got, item.Choice.NodeName)
+	}
+	want := []string{"premium-tpl-us", "node-1"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("attempt route order: got %v want %v", got, want)
 	}

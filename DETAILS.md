@@ -132,21 +132,21 @@ WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读�
 核心选择入口：
 
 - `SelectEgress(region, strategy, residential)`：按请求参数选择出口，保留给普通/家宽旧调用。
-- `SelectEgressFor(region, strategy, selector)`：按请求参数和 `premium` 节点类别选择出口。
+- `SelectEgressFor(region, strategy, selector)`：按请求参数、家宽类别和高端偏好选择出口。
 - `SelectAnyEgress(strategy, residential, maxLatency)`：不指定地区时选择任意非直连静态/订阅出口。
-- `SelectAnyEgressFor(strategy, selector, maxLatency)`：不指定地区时按节点类别选择任意非直连静态/订阅出口。
+- `SelectAnyEgressFor(strategy, selector, maxLatency)`：不指定地区时按家宽类别和高端偏好选择任意非直连静态/订阅出口。
 - `NormalizeRegionCode(value)`：标准化二字母地区码。
 - `NormalizeStrategy(value)`：标准化选择策略。
 - `EgressGroup(region, residential)`：生成地区组代码，例如 `US`、`US-RES`。
-- `EgressGroupFor(region, selector)`：生成带高端后缀的地区组代码，例如 `US-PREM`、`US-RES-PREM`。
+- `EgressGroupFor(region, selector)`：生成地区组代码；`premium` 不改变组名。
 - `AnyEgressGroup(residential)`：生成地区无关组代码，例如 `ANY`、`ANY-RES`。
-- `AnyEgressGroupFor(selector)`：生成带高端后缀的地区无关组代码，例如 `ANY-PREM`。
+- `AnyEgressGroupFor(selector)`：生成地区无关组代码；`premium` 不改变组名。
 
 选择规则：
 
-- 普通请求只使用普通节点和普通模板。
+- 普通请求使用该家宽类别下的全部节点和模板，包含高端节点和高端模板。
 - 家宽请求只使用家宽节点和家宽模板。
-- 高端请求只使用高端节点和高端模板；未指定地区时自动选择任意高端非直连节点。
+- 高端请求把高端节点和高端模板排在前面；高端不可用或尝试失败时回到原有候选和 fallback。
 - 静态节点和订阅节点优先，单次 `/proxy` 默认最多尝试 5 个可用节点。
 - 模板节点按 `priority` 降序尝试，同优先级按池名排序。
 - 地区无关请求只使用非 `direct` 的静态节点和订阅节点，不使用直连或模板节点。

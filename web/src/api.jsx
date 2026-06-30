@@ -233,7 +233,6 @@
     if (!trace.region) return "DIRECT";
     let group = trace.region || "UN";
     if (trace.residential) group += "-RES";
-    if (trace.premium) group += "-PREM";
     return group;
   }
 

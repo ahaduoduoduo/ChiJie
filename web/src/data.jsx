@@ -57,14 +57,13 @@ function normalizeRegionCodeForFlag(code) {
 }
 
 function baseRegionCode(code) {
-  return String(code || "").trim().toUpperCase().replace(/-(RES|PREM)/g, "");
+  return String(code || "").trim().toUpperCase().replace(/-RES/g, "").replace(/-PREM/g, "");
 }
 
-function egressGroupCode(region, residential, premium) {
-  if (!region) return premium ? "ANY-PREM" : "ANY";
+function egressGroupCode(region, residential) {
+  if (!region) return "ANY";
   let code = String(region || "").trim().toUpperCase();
   if (residential) code += "-RES";
-  if (premium) code += "-PREM";
   return code;
 }
 
@@ -199,10 +198,10 @@ function buildRegionGroups(pools) {
     if (!pool.enabled) continue;
     for (const n of pool.nodes || []) {
       if (!n.region || n.region === "UN") continue;
-      const code = egressGroupCode(n.region, n.residential, n.premium);
+      const code = egressGroupCode(n.region, n.residential);
       if (!groups[code]) {
         groups[code] = {
-          code, region: n.region, residential: !!n.residential, premium: !!n.premium,
+          code, region: n.region, residential: !!n.residential,
           name: REGION_NAMES[n.region] || n.region,
           flag: regionFlag(n.region) || "🏳️",
           count: 0, online: 0, sources: new Set(), latencies: [],
@@ -218,7 +217,7 @@ function buildRegionGroups(pools) {
   }
   // Template fallback availability
   const hasTemplateFor = (group) => pools.some(p =>
-    p.source === "template" && p.enabled && !!p.premium === !!group.premium &&
+    p.source === "template" && p.enabled &&
     (p.coverage === "both" || !!p.residential === !!group.residential)
   );
   return Object.values(groups).map(g => ({
@@ -228,7 +227,6 @@ function buildRegionGroups(pools) {
     templateBackup: hasTemplateFor(g),
   })).sort((a, b) => {
     if (a.residential !== b.residential) return a.residential ? 1 : -1;
-    if (a.premium !== b.premium) return a.premium ? 1 : -1;
     return a.region.localeCompare(b.region);
   });
 }
@@ -267,10 +265,9 @@ function buildTraffic(pools) {
   for (let i = 0; i < 64; i++) {
     const useTemplate = Math.random() < 0.18;
     const residential = Math.random() < 0.22;
-    const premium = Math.random() < 0.12;
     const candidates = useTemplate
-      ? tplPools.filter(p => !!p.residential === residential && !!p.premium === premium)
-      : realNodes.filter(n => !!n.residential === residential && !!n.premium === premium);
+      ? tplPools.filter(p => !!p.residential === residential)
+      : realNodes.filter(n => !!n.residential === residential);
     let region, pool, node, isTpl = false;
     if (useTemplate && candidates.length) {
       const codes = ["US","HK","JP","TW","SG","NG","IN","BR","KR","DE"];
@@ -299,10 +296,9 @@ function buildTraffic(pools) {
       method: METHODS[Math.floor(Math.random() * METHODS.length)],
       url: `https://${TARGETS[Math.floor(Math.random() * TARGETS.length)]}/v1/path/${(Math.random()+1).toString(36).substring(2,8)}`,
       region,
-      group: egressGroupCode(region, residential, premium),
+      group: egressGroupCode(region, residential),
       strategy: STRATEGIES[Math.floor(Math.random() * STRATEGIES.length)],
       residential,
-      premium,
       pool,
       node,
       template: isTpl,

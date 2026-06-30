@@ -93,7 +93,7 @@ Content-Type: application/json
 | `egress.max_latency_ms` | number | 否 | 配合 `any=true` 使用，按最近健康检查延迟过滤候选出口 |
 | `egress.strategy` | string | 否 | `random`、`round-robin`、`least-latency`，默认 `random` |
 | `egress.residential` | boolean | 否 | 是否要求家宽出口；为 `false` 时优先普通出口，普通出口不可用时可降级使用同地区家宽出口 |
-| `egress.premium` | boolean | 否 | 是否要求高端出口；为 `true` 且未指定地区时会自动选择任意高端非直连出口 |
+| `egress.premium` | boolean | 否 | 是否优先使用高端出口；为 `true` 且未指定地区时会自动选择任意非直连出口并优先尝试高端节点 |
 | `egress.tls_fingerprint` | string | 否 | TLS 指纹名称或指纹配置字符串，例如 `chrome` |
 
 地区码会标准化为大写二字母代码。英国使用标准码 `GB`；传入 `UK` 时也会归一为 `GB`。
@@ -448,7 +448,7 @@ Authorization: Bearer <proxy_token>
 }
 ```
 
-高端出口会查找 `US-PREM`、`US-RES-PREM` 或 `ANY-PREM` 这类地区组。适合访问开启 Cloudflare 防护、普通节点容易被阻挡的网站。
+高端出口不会创建单独地区组。`premium=true` 会在原有 `US`、`US-RES` 或 `ANY` 候选集合里优先尝试高端节点；高端不可用时继续使用原有 fallback。适合访问开启 Cloudflare 防护、普通节点容易被阻挡的网站。
 
 ### TLS 指纹
 

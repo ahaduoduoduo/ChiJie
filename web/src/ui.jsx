@@ -73,14 +73,22 @@ function Seg({ options, value, onChange }) {
   );
 }
 
-function RegionPill({ code, residential, premium, flag }) {
+function RegionPill({ code, residential, flag }) {
   // derive flag from code prefix if not given
-  const baseCode = window.PG?.baseRegionCode ? window.PG.baseRegionCode(code) : String(code || "").replace(/-(RES|PREM)/g, "");
+  const baseCode = window.PG?.baseRegionCode ? window.PG.baseRegionCode(code) : String(code || "").replace(/-RES/g, "").replace(/-PREM/g, "");
   const flagEmoji = flag || window.PG?.regionFlag?.(baseCode) || null;
   return (
-    <span className={`pill region ${residential ? "res" : ""} ${premium ? "premium" : ""}`}>
+    <span className={`pill region ${residential ? "res" : ""}`}>
       {flagEmoji && <span style={{fontSize:11, lineHeight:1, marginRight:1, filter:"saturate(0.85)"}}>{flagEmoji}</span>}
       {code}
+    </span>
+  );
+}
+
+function PremiumDot({ label = false }) {
+  return (
+    <span className={`premium-dot ${label ? "with-label" : ""}`} title="Premium node" aria-label="Premium node">
+      {label && <span>premium</span>}
     </span>
   );
 }
@@ -344,7 +352,7 @@ function TrafficRuleBuilder({ request, onSave }) {
 
 function RequestDetailContent({ request, onSaveGroupingRule }) {
   if (!request) return null;
-  const replayRegion = request.region || (window.PG?.baseRegionCode ? window.PG.baseRegionCode(request.group) : String(request.group || "").replace(/-(RES|PREM)/g, ""));
+  const replayRegion = request.region || (window.PG?.baseRegionCode ? window.PG.baseRegionCode(request.group) : String(request.group || "").replace(/-RES/g, "").replace(/-PREM/g, ""));
   const [ruleOpen, setRuleOpen] = useState(false);
   const parsed = parseURL(request.url);
   const canEditRule = !!onSaveGroupingRule && isRequestError(request) && queryEntries(parsed).length > 0;
@@ -359,8 +367,7 @@ function RequestDetailContent({ request, onSaveGroupingRule }) {
         <span className="pill mono"><StatusCode code={request.status}/></span>
         <span className="pill mono">{request.method}</span>
         {request.type === "tunnel" && <span className="pill res">WS tunnel</span>}
-        <RegionPill code={request.group} residential={request.residential} premium={request.premium}/>
-        {request.premium && <span className="pill premium mono">premium</span>}
+        <RegionPill code={request.group} residential={request.residential}/>
         {request.group_count > 1 && <span className="pill mono">x{request.group_count}</span>}
         {request.template && <span className="pill mono">template</span>}
         {canEditRule && (
@@ -402,4 +409,4 @@ Authorization: Bearer <proxy_token>
   );
 }
 
-window.UI = { ToastProvider, useToast, Modal, Drawer, Toggle, Seg, RegionPill, StatusDot, LatencyBar, Sparkline, BarChart, fmtBytes, fmtAgo, fmtUTC8, StatusCode, RequestDetailContent };
+window.UI = { ToastProvider, useToast, Modal, Drawer, Toggle, Seg, RegionPill, PremiumDot, StatusDot, LatencyBar, Sparkline, BarChart, fmtBytes, fmtAgo, fmtUTC8, StatusCode, RequestDetailContent };

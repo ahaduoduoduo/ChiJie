@@ -8,7 +8,7 @@
 
 Chijie 当前只维护节点池。调用方在请求里声明 `egress.region`、`egress.strategy`、`egress.residential`、`egress.premium` 和 `egress.tls_fingerprint`，后端根据这些参数选择出口。
 
-订阅源导入后，系统把节点保留在对应的 subscription 节点池中，并为每个节点计算地区组。普通节点进入 `US`、`HK`、`JP` 这类普通地区组；家宽节点进入 `US-RES`、`HK-RES`、`JP-RES` 这类家宽地区组；高端节点进入 `US-PREM` 这类高端地区组；高端家宽节点进入 `US-RES-PREM` 这类组合地区组。
+订阅源导入后，系统把节点保留在对应的 subscription 节点池中，并为每个节点计算地区组。普通节点进入 `US`、`HK`、`JP` 这类普通地区组；家宽节点进入 `US-RES`、`HK-RES`、`JP-RES` 这类家宽地区组。高端不创建单独地区组，高端普通节点仍在普通地区组，高端家宽节点仍在家宽地区组。
 
 ## subscription 配置字段
 
@@ -27,7 +27,7 @@ Chijie 当前只维护节点池。调用方在请求里声明 `egress.region`、
 - `region_group_names`：地区代码到分组展示名的映射。
 - `tags`：节点池级标签。
 - `residential`：池级家宽标识，设置后该池内节点默认进入家宽地区组。
-- `premium`：池级高端标识，设置后该池内节点默认进入高端地区组。
+- `premium`：池级高端标识，设置后该池内节点默认标记为高端节点。
 
 订阅地址只允许 `http` / `https`，默认拒绝私网、回环、CGNAT 和保留地址。单次订阅响应 body 上限为 4 MB，超过后该订阅地址按失败处理。运行时已有旧节点时，自动刷新或配置重载的最新一次拉取失败不会清空该池节点，系统保留上一次成功拉取的节点并记录池级错误。
 
@@ -86,14 +86,14 @@ node_pools:
 
 ## 高端识别
 
-节点进入高端组的条件：
+节点标记为高端的条件：
 
 - 节点自身配置 `premium: true`。
 - 节点池配置 `premium: true`。
 - 节点标签包含 `premium` 或 `high-end`。
 - 节点名包含高端、premium、high-end 等可识别字样。
 
-普通请求不会选择高端节点。高端请求只选择高端节点；如果同时设置 `residential=true`，则选择高端家宽节点。
+普通请求可以选择高端节点。高端请求优先选择高端节点；高端不可用时继续使用原有普通、家宽或模板 fallback。
 
 ## 出口选择
 
@@ -116,15 +116,15 @@ node_pools:
 选择流程：
 
 1. `region` 为空且 `premium` 不是 `true` 时使用直连出口。
-2. `premium=true` 且 `region` 为空时选择任意高端非直连出口。
+2. `premium=true` 且 `region` 为空时选择任意非直连出口，并优先尝试高端节点。
 3. `region` 非空时标准化为大写二字母地区码。
 4. `residential=false` 查找普通地区组，例如 `US`。
 5. `residential=true` 查找家宽地区组，例如 `US-RES`。
-6. `premium=true` 查找高端地区组，例如 `US-PREM` 或 `US-RES-PREM`。
+6. `premium=true` 优先选择高端节点；高端不可用或尝试失败时继续使用原有候选。
 7. 先从可用静态节点和订阅节点中选择。
 8. 如果没有可用节点，且订阅池开启 `try_offline`，某地区只有一个离线订阅节点时会在模板前尝试该节点。
 9. 地区组内没有可用节点时，使用同类型模板节点。
-10. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板；高端请求只在高端集合内降级。
+10. 普通请求没有普通节点和普通模板时，降级尝试同地区家宽节点和家宽模板；高端请求也保留这类原有 fallback。
 11. 没有可用节点也没有可用模板时返回错误。
 
 `strategy` 只在当前候选集合内生效：
@@ -190,11 +190,10 @@ node_pools:
 
 每个节点池还返回 `region_groups`：
 
-- `group`：地区组代码，例如 `US`、`US-RES`、`US-PREM`。
+- `group`：地区组代码，例如 `US`、`US-RES`。
 - `region`：二字母地区码。
 - `name`：展示名。
 - `residential`：是否家宽组。
-- `premium`：是否高端组。
 - `count`：组内节点数。
 - `online`：组内可用节点数。
 

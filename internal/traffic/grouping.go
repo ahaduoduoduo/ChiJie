@@ -284,9 +284,6 @@ func targetArea(trace Trace) string {
 		if trace.Residential && !strings.Contains(region, "-RES") {
 			region += "-RES"
 		}
-		if trace.Premium && !strings.Contains(region, "-PREM") {
-			region += "-PREM"
-		}
 		return region
 	}
 	return "DIRECT"
