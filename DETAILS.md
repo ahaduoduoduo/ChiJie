@@ -105,13 +105,13 @@ chijie/
 
 ### server（请求入口）
 
-接收 `POST /proxy` 请求，完成认证、JSON 解包、`egress` 参数解析、出口候选排序、TLS 指纹包装、目标请求执行、出口失败重试、失败节点即时离线、模板延后兜底、响应大小限制和流量记录。
+接收 `POST /proxy` 请求，完成认证、JSON 解包、`egress` 参数解析、出口候选排序、TLS 指纹包装、目标请求执行、上游 `Set-Cookie` 响应头转发、出口失败重试、失败节点即时离线、模板延后兜底、响应大小限制和流量记录。
 
 `ProxyRequest` 当前字段：
 
 - `url`：目标 URL。
 - `method`：目标请求方法，缺省为 `GET`。
-- `headers`：目标请求 Header。
+- `headers`：目标请求 Header，包括调用方显式传入的 `Cookie`。
 - `payload`：目标请求 Body。
 - `egress`：出口参数，包括 `region`、`any`、`max_latency_ms`、`strategy`、`residential`、`tls_fingerprint`。
 
@@ -200,7 +200,9 @@ JA3/JA4/Akamai 都按 raw 输入保存，测试结果只展示远端返回的真
 - 地区、地区组、策略、家宽标识。
 - 出口池、出口节点、来源类型、是否模板。
 - TLS 指纹、状态码、耗时、字节数和错误文本。
-- 分钟级请求数、成功率、P95、响应字节数和活跃隧道数。
+- 原始 trace、合并展示 trace、分钟级有效请求数、成功率、成功请求平均延迟 / P95 和活跃隧道数。
+
+失败请求按 `kind + url/target + egress_group` 合并为有效错误，不把 header、payload、出口节点或策略纳入合并键。成功请求不合并；延迟指标只使用成功请求，避免目标站点长时间无响应导致的重复失败污染延迟视图。
 
 ### admin（管理 API）
 
@@ -219,7 +221,7 @@ JA3/JA4/Akamai 都按 raw 输入保存，测试结果只展示远端返回的真
 - TLS 指纹 CRUD 和真实 HTTPS 目标测试。
 - `POST /api/reload`：重载 `nodes.yaml` 和 `fingerprints.yaml`。
 - `GET /api/stats`：返回运行时长、节点池数量、指纹数量和流量指标。
-- `GET /api/traffic`：返回请求记录、时间序列和聚合指标。
+- `GET /api/traffic`：返回原始请求记录、合并展示记录、时间序列和聚合指标。
 - `PUT /api/system/logging`：修改运行时日志级别，并写回 `gateway.yaml`。
 - `GET /api/system/health-check` / `PUT /api/system/health-check`：读取或保存全局健康检查默认参数，并写回 `gateway.yaml`。
 - `GET /api/system/proxy` / `PUT /api/system/proxy`：读取或保存 `/proxy` 响应头等待超时、完整请求总超时、重试次数和模板兜底设置，并写回 `gateway.yaml`。

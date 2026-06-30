@@ -212,7 +212,8 @@
         total,
         success: Math.max(0, total - errors),
         errors,
-        p95: Number(metrics?.p95_latency_ms || 0),
+        avg: Number(bucket.avg_latency_ms || 0),
+        p95: Number(bucket.p95_latency_ms ?? metrics?.p95_latency_ms ?? 0),
       };
     });
     if (items.length) return items;
@@ -221,6 +222,7 @@
       total: 0,
       success: 0,
       errors: 0,
+      avg: 0,
       p95: 0,
     }));
   }
@@ -246,14 +248,21 @@
       duration_ms: Number(trace.latency_ms || 0),
       bytes: Number(trace.request_bytes || 0) + Number(trace.response_bytes || 0),
       error: trace.error || "",
+      group_key: trace.group_key || "",
+      group_count: Number(trace.group_count || 1),
+      children: (trace.children || []).map(normalizeTrace),
     };
   }
 
   function normalizeTraffic(snapshot) {
     const metrics = snapshot?.metrics || {};
+    const rawTraces = snapshot?.traces || [];
+    const displayTraces = snapshot?.display_traces || rawTraces;
     return {
       metrics,
-      requests: (snapshot?.traces || []).map(normalizeTrace),
+      requests: displayTraces.map(normalizeTrace),
+      rawLoaded: rawTraces.length,
+      rawTotal: Number(metrics.raw_requests || rawTraces.length),
       series: normalizeSeries(snapshot?.series || [], metrics),
     };
   }

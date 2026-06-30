@@ -6,7 +6,9 @@ const { ToastProvider, useToast } = window.UI;
 const EMPTY_TRAFFIC = {
   metrics: {},
   requests: [],
-  series: Array.from({ length: 60 }, (_, t) => ({ t, total: 0, success: 0, errors: 0, p95: 0 })),
+  rawLoaded: 0,
+  rawTotal: 0,
+  series: Array.from({ length: 60 }, (_, t) => ({ t, total: 0, success: 0, errors: 0, avg: 0, p95: 0 })),
 };
 
 function emptyState() {
@@ -117,7 +119,7 @@ function Sidebar({ page, setPage, state }) {
     subscriptions: state.pools.filter(p => p.source === "subscription").length,
     templates: state.pools.filter(p => p.source === "template").length,
     tls: state.fingerprints.length,
-    traffic: state.traffic.requests.length,
+    traffic: state.traffic.metrics?.requests ?? state.traffic.requests.length,
   };
   return (
     <div className="sidebar">

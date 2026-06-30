@@ -416,3 +416,29 @@
 - [x] `/proxy` 单个出口完整请求总超时改为 `proxy.total_timeout` 配置，默认 `30s`
 - [x] System 页面支持查看和保存 Proxy response header timeout 与 total timeout
 - [x] `/api/system/proxy` 持久化响应头等待超时、完整请求总超时、重试次数和模板兜底设置
+
+## P44 — Proxy token 文档澄清 ✅
+日期：2026-06-27
+
+- [x] README 明确 Proxy token 是无状态 JWT，只在生成时显示一次，后台不保存历史 token 与到期时间
+- [x] `docs/proxy-client-usage.md` 补充生产环境保存 token 与失效方式说明
+
+## P45 — Proxy Cookie 响应头透出 ✅
+日期：2026-06-28
+
+- [x] `/proxy` 将目标站点返回的多个 `Set-Cookie` 响应头逐条写入网关响应
+- [x] 远端 Chijie 模板响应保留 `Set-Cookie`，支持多级转发场景
+- [x] README、DETAILS 和 `docs/proxy-client-usage.md` 补充 Cookie 请求与响应边界说明
+
+## P46 — Traffic 失败合并统计 ✅
+日期：2026-06-29
+
+- [x] Traffic 指标区分 raw 请求和有效请求，重复失败按 `kind + url/target + egress_group` 合并为一次错误
+- [x] 延迟指标只统计最终成功的请求，避免目标站点超时失败污染平均延迟和 P95
+- [x] `/api/traffic` 返回 `display_traces`，Admin Traffic 页面将可合并错误显示为一条并通过 `xN` 展开原始请求
+- [x] README 和 DETAILS 补充 Traffic 统计口径说明
+
+## P47 — Traffic 分钟级 P95 零值修复 ✅
+日期：2026-06-30
+
+- [x] 前端保留后端返回的 `bucket.p95_latency_ms = 0`，避免失败-only 分钟桶被全局 P95 覆盖

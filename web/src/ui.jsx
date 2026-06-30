@@ -186,6 +186,7 @@ function RequestDetailContent({ request }) {
         <span className="pill mono">{request.method}</span>
         {request.type === "tunnel" && <span className="pill res">WS tunnel</span>}
         <RegionPill code={request.group} residential={request.residential}/>
+        {request.group_count > 1 && <span className="pill mono">x{request.group_count}</span>}
         {request.template && <span className="pill mono">template</span>}
       </div>
       <div className="kv" style={{rowGap:14}}>

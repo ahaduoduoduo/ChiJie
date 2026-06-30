@@ -113,7 +113,7 @@ func TestDoProxyTotalTimeoutCoversResponseBodyRead(t *testing.T) {
 		},
 	}
 	started := time.Now()
-	_, _, _, err := s.doProxy(context.Background(), &ProxyRequest{
+	_, err := s.doProxy(context.Background(), &ProxyRequest{
 		URL:    target.URL,
 		Method: http.MethodGet,
 	}, &egressRoute{Direct: true, Group: "DIRECT"})
@@ -125,6 +125,56 @@ func TestDoProxyTotalTimeoutCoversResponseBodyRead(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "read response") {
 		t.Fatalf("expected body read timeout, got: %v", err)
+	}
+}
+
+func TestHandleProxyForwardsSetCookieHeaders(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Add("Set-Cookie", "session=abc; Path=/; HttpOnly")
+		w.Header().Add("Set-Cookie", "pref=dark; Path=/")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer target.Close()
+
+	jwtSecret := "jwt-secret"
+	s := &Server{
+		auth:                NewAuth(jwtSecret),
+		allowPrivateTargets: true,
+		proxySettings:       DefaultProxySettings(),
+	}
+	gateway := httptest.NewServer(http.HandlerFunc(s.handleProxy))
+	defer gateway.Close()
+
+	body, err := json.Marshal(ProxyRequest{URL: target.URL, Method: http.MethodGet})
+	if err != nil {
+		t.Fatalf("marshal proxy request: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, gateway.URL, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("create proxy request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+signedProxyToken(t, jwtSecret))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("proxy request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK || string(respBody) != "ok" {
+		t.Fatalf("unexpected response: status=%d body=%q", resp.StatusCode, respBody)
+	}
+
+	got := resp.Header.Values("Set-Cookie")
+	want := []string{"session=abc; Path=/; HttpOnly", "pref=dark; Path=/"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("set-cookie headers: got %v want %v", got, want)
 	}
 }
 
@@ -314,15 +364,15 @@ func TestDoProxyWithRetryUsesNextCandidateOnTransportError(t *testing.T) {
 		},
 	}
 
-	respBody, contentType, statusCode, finalRoute, err := (&Server{}).doProxyWithRetry(context.Background(), &ProxyRequest{
+	resp, finalRoute, err := (&Server{}).doProxyWithRetry(context.Background(), &ProxyRequest{
 		URL:    target.URL,
 		Method: http.MethodGet,
 	}, route)
 	if err != nil {
 		t.Fatalf("proxy with retry: %v", err)
 	}
-	if string(respBody) != "ok" || statusCode != http.StatusOK || contentType != "text/plain" {
-		t.Fatalf("unexpected response: body=%q status=%d contentType=%q", respBody, statusCode, contentType)
+	if string(resp.Body) != "ok" || resp.StatusCode != http.StatusOK || resp.ContentType != "text/plain" {
+		t.Fatalf("unexpected response: body=%q status=%d contentType=%q", resp.Body, resp.StatusCode, resp.ContentType)
 	}
 	if finalRoute == nil || finalRoute.Choice == nil || finalRoute.Choice.NodeName != "second" {
 		t.Fatalf("expected second candidate, got %#v", finalRoute)
@@ -408,7 +458,7 @@ node_pools:
 		},
 	}
 
-	_, _, _, finalRoute, err := (&Server{poolManager: manager, proxySettings: DefaultProxySettings()}).doProxyWithRetry(context.Background(), &ProxyRequest{
+	_, finalRoute, err := (&Server{poolManager: manager, proxySettings: DefaultProxySettings()}).doProxyWithRetry(context.Background(), &ProxyRequest{
 		URL:    target.URL,
 		Method: http.MethodGet,
 	}, route)
@@ -457,15 +507,15 @@ func TestDoProxyWithRetryDoesNotRetryResponseStatus(t *testing.T) {
 		},
 	}
 
-	_, _, statusCode, finalRoute, err := (&Server{}).doProxyWithRetry(context.Background(), &ProxyRequest{
+	resp, finalRoute, err := (&Server{}).doProxyWithRetry(context.Background(), &ProxyRequest{
 		URL:    target.URL,
 		Method: http.MethodGet,
 	}, route)
 	if err != nil {
 		t.Fatalf("proxy should return upstream response without retry error: %v", err)
 	}
-	if statusCode != http.StatusForbidden {
-		t.Fatalf("status: got %d want %d", statusCode, http.StatusForbidden)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status: got %d want %d", resp.StatusCode, http.StatusForbidden)
 	}
 	if finalRoute == nil || finalRoute.Choice == nil || finalRoute.Choice.NodeName != "direct" {
 		t.Fatalf("expected first candidate, got %#v", finalRoute)
@@ -491,6 +541,8 @@ func TestRemoteChijieTemplateForwardsRequestWithBearerAndHop(t *testing.T) {
 			t.Fatalf("decode forwarded body: %v", err)
 		}
 		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Add("Set-Cookie", "remote_session=abc; Path=/; HttpOnly")
+		w.Header().Add("Set-Cookie", "remote_pref=dark; Path=/")
 		_, _ = w.Write([]byte("remote-ok"))
 	}))
 	defer remote.Close()
@@ -512,12 +564,16 @@ func TestRemoteChijieTemplateForwardsRequestWithBearerAndHop(t *testing.T) {
 		Hop:     1,
 	}
 
-	body, contentType, statusCode, finalRoute, err := (&Server{remoteChijieClient: remote.Client()}).doProxyWithRetry(context.Background(), req, route)
+	resp, finalRoute, err := (&Server{remoteChijieClient: remote.Client()}).doProxyWithRetry(context.Background(), req, route)
 	if err != nil {
 		t.Fatalf("remote chijie proxy: %v", err)
 	}
-	if string(body) != "remote-ok" || statusCode != http.StatusOK || contentType != "text/plain" {
-		t.Fatalf("unexpected response: body=%q status=%d contentType=%q", body, statusCode, contentType)
+	if string(resp.Body) != "remote-ok" || resp.StatusCode != http.StatusOK || resp.ContentType != "text/plain" {
+		t.Fatalf("unexpected response: body=%q status=%d contentType=%q", resp.Body, resp.StatusCode, resp.ContentType)
+	}
+	wantCookies := []string{"remote_session=abc; Path=/; HttpOnly", "remote_pref=dark; Path=/"}
+	if strings.Join(resp.SetCookies, "\n") != strings.Join(wantCookies, "\n") {
+		t.Fatalf("set-cookie headers: got %v want %v", resp.SetCookies, wantCookies)
 	}
 	if finalRoute == nil || finalRoute.Choice == nil || finalRoute.Choice.PoolName != "chijie-b" {
 		t.Fatalf("unexpected final route: %#v", finalRoute)
@@ -556,15 +612,15 @@ func TestRemoteChijieGatewayErrorFallsBackToNextTemplate(t *testing.T) {
 		},
 	}
 
-	body, _, statusCode, finalRoute, err := (&Server{remoteChijieClient: remote.Client()}).doProxyWithRetry(context.Background(), &ProxyRequest{
+	resp, finalRoute, err := (&Server{remoteChijieClient: remote.Client()}).doProxyWithRetry(context.Background(), &ProxyRequest{
 		URL:    target.URL,
 		Method: http.MethodGet,
 	}, route)
 	if err != nil {
 		t.Fatalf("proxy with template fallback: %v", err)
 	}
-	if string(body) != "fallback-ok" || statusCode != http.StatusOK {
-		t.Fatalf("unexpected fallback response: body=%q status=%d", body, statusCode)
+	if string(resp.Body) != "fallback-ok" || resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected fallback response: body=%q status=%d", resp.Body, resp.StatusCode)
 	}
 	if finalRoute == nil || finalRoute.Choice == nil || finalRoute.Choice.PoolName != "brightdata" {
 		t.Fatalf("expected brightdata fallback, got %#v", finalRoute)
@@ -594,15 +650,15 @@ func TestRemoteChijieSourceStatusDoesNotFallback(t *testing.T) {
 		},
 	}
 
-	_, _, statusCode, finalRoute, err := (&Server{remoteChijieClient: remote.Client()}).doProxyWithRetry(context.Background(), &ProxyRequest{
+	resp, finalRoute, err := (&Server{remoteChijieClient: remote.Client()}).doProxyWithRetry(context.Background(), &ProxyRequest{
 		URL:    "https://target.example/data",
 		Method: http.MethodGet,
 	}, route)
 	if err != nil {
 		t.Fatalf("remote target status should be returned without retry error: %v", err)
 	}
-	if statusCode != http.StatusForbidden {
-		t.Fatalf("status: got %d want %d", statusCode, http.StatusForbidden)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status: got %d want %d", resp.StatusCode, http.StatusForbidden)
 	}
 	if finalRoute == nil || finalRoute.Choice == nil || finalRoute.Choice.PoolName != "chijie-b" {
 		t.Fatalf("expected remote chijie final route, got %#v", finalRoute)

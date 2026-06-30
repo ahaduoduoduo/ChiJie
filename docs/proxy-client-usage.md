@@ -2,7 +2,7 @@
 
 日期：2026-05-07
 
-更新：2026-05-09
+更新：2026-06-28
 
 本文面向接入 Chijie 的业务服务、脚本、Cloudflare Workers 或 AI Agent。调用方不需要访问 Admin API，只需要拿到 `Proxy API` 地址和一个 `proxy_token`。
 
@@ -16,6 +16,8 @@ CHIJIE_PROXY_TOKEN="eyJ..."
 ```
 
 `CHIJIE_BASE_URL` 指向 Proxy API，不是 Admin 管理后台。
+
+`CHIJIE_PROXY_TOKEN` 由 System 页面或 Admin API 的 `/api/auth/proxy-token` 生成。该 token 是无状态 JWT，只在生成时显示一次；后台不保存已创建 token 列表、原文或到期时间。生产环境应将生成结果保存到调用方环境变量或密钥管理系统；失效方式是等待过期，或由服务所有者更换 `admin.jwt_secret` 使全部旧 token 失效。
 
 所有代理请求都使用 Bearer token：
 
@@ -81,7 +83,7 @@ Content-Type: application/json
 | --- | --- | --- | --- |
 | `url` | string | 是 | 目标 URL，`/proxy` 建议使用 `http://` 或 `https://` |
 | `method` | string | 否 | 目标请求方法，默认 `GET` |
-| `headers` | object | 否 | 发送给目标站点的请求 Header |
+| `headers` | object | 否 | 发送给目标站点的请求 Header；目标站点 Cookie 需要显式写入 `headers.Cookie` |
 | `payload` | string | 否 | 发送给目标站点的请求 Body；`GET` / `HEAD` 会忽略该字段 |
 | `egress.region` | string | 否 | 二字母地区码，例如 `US`、`HK`、`JP`、`GB`；为空表示直连 |
 | `egress.any` | boolean | 否 | 为 `true` 时选择任意非直连出口 |
@@ -94,7 +96,9 @@ Content-Type: application/json
 
 ### 响应格式
 
-成功时，Chijie 返回目标服务器的 HTTP status code、`Content-Type` 和响应体。响应体不是固定 JSON 包装，而是目标站点原始响应体。
+成功时，Chijie 返回目标服务器的 HTTP status code、`Content-Type` 和响应体。目标站点返回的 `Set-Cookie` 会逐条写入 `/proxy` 响应头。响应体不是固定 JSON 包装，而是目标站点原始响应体。
+
+Chijie 不保存 cookie，不会自动把本次响应里的 `Set-Cookie` 转成下一次请求的 `Cookie`。需要会话保持时，调用方负责保存目标站点返回的 cookie，并在后续请求的 `headers.Cookie` 中带回。浏览器环境还会受到浏览器对 `Set-Cookie`、`Domain`、`Path` 和 JavaScript 可读性的限制。
 
 例如目标站点返回 `200 application/json`：
 
@@ -186,6 +190,24 @@ curl -sS "$CHIJIE_BASE_URL/proxy" \
     }
   }'
 ```
+
+### 调用示例：携带目标站点 Cookie
+
+```bash
+curl -i "$CHIJIE_BASE_URL/proxy" \
+  -H "Authorization: Bearer $CHIJIE_PROXY_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-binary '{
+    "url": "https://target.example/account",
+    "method": "GET",
+    "headers": {
+      "Cookie": "session=abc; uid=123",
+      "User-Agent": "Mozilla/5.0"
+    }
+  }'
+```
+
+如果目标站点响应中包含 `Set-Cookie`，`curl -i` 会在 `/proxy` 的响应头中看到对应的 `Set-Cookie`。后续请求仍需要调用方自行把有效 cookie 拼成 `headers.Cookie`。
 
 ### Node.js 示例
 

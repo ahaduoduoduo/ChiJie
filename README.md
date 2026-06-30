@@ -167,11 +167,13 @@ Content-Type: application/json
 
 `Authorization: Bearer <proxy_token>` 使用后台 System 页面或 `/api/auth/proxy-token` 生成的 JWT。
 
+Proxy token 是无状态 JWT，只在生成弹窗中显示一次；后台不保存 token 清单、原文或到期时间，因此刷新页面或重新登录后不会再展示之前创建的 token。生产环境需要由调用方或密钥管理系统保存生成结果；失效方式是等待 token 过期，或更换 `admin.jwt_secret` 使全部旧 token 失效。
+
 字段说明：
 
 - `url`：目标 URL，必填。
 - `method`：目标请求方法，缺省为 `GET`。
-- `headers`：目标请求 Header。
+- `headers`：目标请求 Header；目标站点 Cookie 需要显式写入 `headers.Cookie`。
 - `payload`：目标请求 Body。`GET` 和 `HEAD` 请求不会发送 Body。
 - `egress.region`：二字母地区码；空字符串表示直连。
 - `egress.any`：为 `true` 时不指定地区，选择一个非直连静态/订阅出口；也可将 `region` 传为 `*`、`ANY` 或 `AUTO`。
@@ -180,7 +182,7 @@ Content-Type: application/json
 - `egress.residential`：是否使用家宽出口。
 - `egress.tls_fingerprint`：TLS 指纹名称、预设名、JA3 raw、JA4 raw、Akamai raw 或可解析的配置字符串；测试结果以远端返回的真实指纹信息为准。
 
-响应使用目标服务器的 status code、`Content-Type` 和响应体。
+响应使用目标服务器的 status code、`Content-Type` 和响应体。目标服务器返回的 `Set-Cookie` 会逐条写入 `/proxy` 响应头；网关不保存 cookie、不自动生成下一次请求的 `Cookie`，也不改写 cookie 的 `Domain` / `Path`。
 
 如果选中的非直连出口在建立连接或等待响应头阶段失败（例如 `EOF`、拨号失败、代理断流、TLS 握手失败），`/proxy` 会按当前策略继续换候选出口，默认最多尝试 5 个可用静态/订阅节点。失败的静态/订阅节点会立即标记为 `Alive=false`，后续可由健康检查恢复。目标站点已经返回 HTTP 状态码时不会重试，例如真实的 `403`、`404`、`502` 会原样返回给调用方。
 
@@ -248,7 +250,7 @@ admin:
 
 登录后获取 JWT token，后续请求携带 `Authorization: Bearer <token>` Header。`password` 为空时不启用 Admin 鉴权。
 
-Proxy API 调用 token 由后台生成，使用同一个 `jwt_secret` 签名，但 claim 中只带 `proxy=true`，不能访问 Admin API。JWT 为无状态 token，失效方式是等待过期或更换 `admin.jwt_secret`。
+Proxy API 调用 token 由后台生成，使用同一个 `jwt_secret` 签名，但 claim 中只带 `proxy=true`，不能访问 Admin API。JWT 为无状态 token，只在生成时返回原文和到期时间；后台不持久化 token 记录，失效方式是等待过期或更换 `admin.jwt_secret`。
 
 ### API 端点
 
@@ -279,7 +281,9 @@ Proxy API 调用 token 由后台生成，使用同一个 `jwt_secret` 签名，�
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| GET | /api/traffic?limit=100 | 查看请求记录、分钟级流量序列和聚合指标；内存最多保留最近 1000 条 |
+| GET | /api/traffic?limit=100 | 查看请求记录、合并展示记录、分钟级流量序列和聚合指标；内存最多保留最近 1000 条 |
+
+Traffic 指标使用有效请求口径：成功请求逐条计入；失败请求按 `kind + url/target + egress_group` 合并计入，避免同一个目标故障被调用方重复重试后放大错误率。延迟指标只统计最终成功的请求；原始请求数仍通过 `raw_requests` / `raw_failures` 返回给 Admin 页面展示。
 
 #### 指纹管理
 

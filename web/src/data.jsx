@@ -304,10 +304,31 @@ function buildTraffic(pools) {
       total,
       success: total - errors,
       errors,
+      avg: Math.round(120 + Math.sin(i / 8) * 35 + Math.random() * 35),
       p95: Math.round(280 + Math.sin(i / 9) * 90 + Math.random() * 80),
     });
   }
-  return { requests: requests.sort((a,b) => b.ts - a.ts), series };
+  const sorted = requests.sort((a,b) => b.ts - a.ts);
+  const successes = sorted.filter(r => r.status > 0 && r.status < 400 && !r.error);
+  const failures = sorted.filter(r => r.status === 0 || r.status >= 400 || !!r.error);
+  const latencies = successes.map(r => r.duration_ms).sort((a,b) => a - b);
+  const p95Index = Math.max(0, Math.min(latencies.length - 1, Math.ceil(latencies.length * 0.95) - 1));
+  return {
+    metrics: {
+      requests: sorted.length,
+      success: successes.length,
+      failures: failures.length,
+      raw_requests: sorted.length,
+      raw_failures: failures.length,
+      success_rate: sorted.length ? successes.length / sorted.length : 1,
+      avg_latency_ms: latencies.length ? Math.round(latencies.reduce((a,b) => a + b, 0) / latencies.length) : 0,
+      p95_latency_ms: latencies[p95Index] || 0,
+    },
+    requests: sorted,
+    rawLoaded: sorted.length,
+    rawTotal: sorted.length,
+    series,
+  };
 }
 
 window.PG = {
