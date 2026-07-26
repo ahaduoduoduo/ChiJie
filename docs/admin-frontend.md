@@ -2,7 +2,7 @@
 
 日期：2026-05-04
 
-更新：2026-07-01
+更新：2026-07-26
 
 `web/` 目录是当前 Admin 控制台原型源码。页面使用 React UMD 与 Babel standalone，以静态文件方式运行；`npm run build` 不做打包压缩，只复制 `index.html` 和 `src/` 到 `web/dist`，再由根目录 `build.sh` 复制到 `internal/admin/dist` 供 Go `embed` 打包。
 
@@ -10,7 +10,7 @@
 
 - `POST /api/auth/login`：密码登录，返回 JWT。
 - `POST /api/auth/proxy-token`：生成只用于代理调用的 Bearer token。
-- `GET /api/nodes`：节点池、节点状态、地区组状态。
+- `GET /api/nodes`：节点池、节点状态、地区组状态；订阅池额外返回最近拉取时间 `last_updated` 和结果 `last_refresh_failed`。
 - `GET /api/fingerprints`：TLS 指纹列表。
 - `GET /api/traffic?limit=200`：请求日志、分钟级序列和聚合指标；Traffic 页面可加载更多，最高展示内存窗口中的最近 1000 条。
 - `GET /api/stats`：运行时长、节点池数量、指纹数量和流量指标。
@@ -33,7 +33,7 @@
 ## 已接入交互
 
 - Egress：节点启停、节点状态测试、静态节点添加、静态节点删除、metadata 编辑、状态刷新；静态节点新增表单会提交用户名和密码字段。
-- Subscriptions：订阅池新增、刷新、启停、节点地区修正、别名、标签、`reject_regex` 保存。
+- Subscriptions：订阅池新增、刷新、启停、节点地区修正、别名、标签、`reject_regex` 保存；最近拉取成功时显示灰色相对时间，失败时显示红色相对时间，悬停可查看本地绝对时间。
 - Templates：模板池新增、编辑、启停、删除、优先级和覆盖范围配置；普通代理模板和 Chijie 模板均支持按地区真实探测，Chijie 模板测试会通过远端 Proxy API 请求 `https://api.ipify.org?format=json`。
 - TLS Profiles：指纹新增、JSON/YAML 配置输入、删除、真实 HTTPS 指纹测试。
 - Overview：最近成功和最近错误请求可打开与 Traffic 一致的请求详情抽屉，详情时间按 UTC+8 展示。

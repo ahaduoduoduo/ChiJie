@@ -144,7 +144,7 @@ Docker Hub 自动发布详见 [docs/dockerhub-release.md](docs/dockerhub-release
 
 订阅导入支持 Clash YAML、Base64 URI 列表、未 Base64 包装的纯 URI 列表。URI 列表支持 `ss`、`vmess`、`vless`、`trojan`、`hysteria2` / `hy2`、`anytls` 和 `tuic`。Shadowsocks URI 支持 `ss://userinfo@host:port?plugin=...` 和 SIP002 常见的 `ss://userinfo@host:port/?plugin=...` 写法；`simple-obfs` 插件名会规范化为 sing-box 可识别的 `obfs-local`。订阅拉取使用 `clash-verge/v2.0.0` User-Agent，以兼容会按客户端 UA 返回不同节点集合的订阅服务。单个订阅池可填写多个订阅地址，使用换行、英文逗号或 `|` 分隔；部分订阅地址失败时，已成功解析的节点仍会进入该池。订阅地址必须使用 `http` / `https`；默认只允许公网目标，池级 `allow_private_host: true` 可允许私网、回环和保留地址。响应体超过 4 MB 时会拒绝解析。
 
-订阅池的 `update_interval` 支持 `30m`、`12h`、`3d`，留空表示只手动刷新。自动刷新或配置重载时，如果最近一次拉取失败，运行时保留上一次成功拉取的节点并记录池级错误。
+订阅池的 `update_interval` 支持 `30m`、`12h`、`3d`，留空表示只手动刷新。自动刷新或配置重载时，如果最近一次拉取失败，运行时保留上一次成功拉取的节点并记录池级错误。运行时同时记录最近一次拉取尝试的时间和结果；Admin Subscriptions 页面以灰色时间表示成功、红色时间表示失败，详细语义见 [docs/subscription-routing.md](docs/subscription-routing.md)。
 
 ## 请求协议
 

@@ -476,3 +476,13 @@
 - [x] 初次拉取、手动刷新、自动刷新、HTTP 重定向和实际拨号使用同一池级设置
 - [x] Admin 新增与编辑订阅界面增加 `Allow local addresses` 开关，并在订阅卡片显示 `local source`
 - [x] 补充后端测试、示例配置、README、DETAILS 和订阅路由文档
+
+## P52 — 订阅最近拉取状态 ✅
+日期：2026-07-26
+
+- [x] subscription 节点池记录最近一次拉取尝试完成时间和成功状态
+- [x] 初次拉取、手动刷新、自动刷新和配置重载使用同一状态记录
+- [x] `GET /api/nodes` 返回 `last_updated` 和 `last_refresh_failed`
+- [x] Admin Subscriptions 页面显示相对时间，成功为灰色，失败为红色
+- [x] 部分节点被跳过的警告与拉取失败使用独立判断
+- [x] 补充后端测试、README、DETAILS 和订阅状态文档

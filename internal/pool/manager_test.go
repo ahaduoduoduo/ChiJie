@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -153,6 +154,9 @@ node_pools:
 	if current.Error == "" {
 		t.Fatalf("expected current fetch error to remain visible")
 	}
+	if current.LastRefreshAt.IsZero() || !current.LastRefreshFailed {
+		t.Fatalf("expected failed reload status to be preserved: %#v", current)
+	}
 }
 
 func TestLoadFromFileDoesNotPreserveStaticEntriesWhenPoolBecomesSubscription(t *testing.T) {
@@ -215,6 +219,9 @@ func TestSubscriptionPoolLoadsWithFetchError(t *testing.T) {
 	if len(pool.Entries) != 0 {
 		t.Fatalf("expected no entries on failed subscription fetch")
 	}
+	if pool.LastRefreshAt.IsZero() || !pool.LastRefreshFailed {
+		t.Fatalf("expected failed initial pull status, got %#v", pool)
+	}
 }
 
 func TestSubscriptionPoolLoadsFromPrivateHostWhenConfigured(t *testing.T) {
@@ -237,6 +244,66 @@ func TestSubscriptionPoolLoadsFromPrivateHostWhenConfigured(t *testing.T) {
 	}
 	if len(loadedPool.Entries) != 1 || loadedPool.Entries[0].Node.Name != "Local Subscription" {
 		t.Fatalf("unexpected subscription entries: %#v", loadedPool.Entries)
+	}
+	if loadedPool.LastRefreshAt.IsZero() || loadedPool.LastRefreshFailed {
+		t.Fatalf("expected successful initial pull status, got %#v", loadedPool)
+	}
+}
+
+func TestRefreshSubscriptionExposesLatestPullTimeAndResult(t *testing.T) {
+	var fail atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			http.Error(w, "temporary failure", http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte("ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNz@proxy.example.com:1080#US%20Node"))
+	}))
+	defer server.Close()
+
+	manager := NewManager()
+	loadedPool, err := manager.buildPool("sub", &PoolConfig{
+		Source:           "subscription",
+		URL:              server.URL,
+		AllowPrivateHost: true,
+	})
+	if err != nil {
+		t.Fatalf("build subscription pool: %v", err)
+	}
+	manager.pools["sub"] = loadedPool
+
+	initial := manager.GetPoolStatus()
+	if len(initial) != 1 || initial[0].LastUpdated == "" || initial[0].LastRefreshFailed {
+		t.Fatalf("unexpected initial pull status: %#v", initial)
+	}
+	initialTime, err := time.Parse(time.RFC3339Nano, initial[0].LastUpdated)
+	if err != nil {
+		t.Fatalf("parse initial last_updated: %v", err)
+	}
+
+	fail.Store(true)
+	if err := manager.RefreshSubscription("sub"); err == nil {
+		t.Fatal("expected refresh failure")
+	}
+	failed := manager.GetPoolStatus()
+	if len(failed) != 1 || !failed[0].LastRefreshFailed || failed[0].LastUpdated == "" {
+		t.Fatalf("unexpected failed pull status: %#v", failed)
+	}
+	failedTime, err := time.Parse(time.RFC3339Nano, failed[0].LastUpdated)
+	if err != nil {
+		t.Fatalf("parse failed last_updated: %v", err)
+	}
+	if failedTime.Before(initialTime) {
+		t.Fatalf("failed pull time %s is before initial pull time %s", failedTime, initialTime)
+	}
+
+	fail.Store(false)
+	if err := manager.RefreshSubscription("sub"); err != nil {
+		t.Fatalf("refresh subscription after recovery: %v", err)
+	}
+	recovered := manager.GetPoolStatus()
+	if len(recovered) != 1 || recovered[0].LastRefreshFailed || recovered[0].LastUpdated == "" {
+		t.Fatalf("unexpected recovered pull status: %#v", recovered)
 	}
 }
 

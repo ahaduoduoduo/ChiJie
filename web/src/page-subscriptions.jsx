@@ -5,6 +5,29 @@ function subscriptionNodeGroup(node) {
   return window.PG.egressGroupCode(node.region, node.residential);
 }
 
+function formatSubscriptionRefreshTime(value) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "never";
+
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (elapsedSeconds < 10) return "just now";
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+
+  return `${Math.floor(elapsedHours / 24)}d ago`;
+}
+
+function subscriptionRefreshTimeTitle(value) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "No pull recorded";
+  return new Date(timestamp).toLocaleString(undefined, { hour12: false });
+}
+
 function PageSubscriptions({ state, dispatch }) {
   const { pools } = state;
   const subs = pools.filter(p => p.source === "subscription");
@@ -34,6 +57,7 @@ function PageSubscriptions({ state, dispatch }) {
           const expanded = !!expandedNodes[s.name];
           const visibleNodes = expanded ? s.nodes : s.nodes.slice(0, 14);
           const errorSummary = subscriptionErrorSummary(s.last_error);
+          const lastUpdated = formatSubscriptionRefreshTime(s.last_updated);
           return (
             <div key={s.name} className="card subscription-card">
               <div className="card-h bordered subscription-card-header">
@@ -44,7 +68,15 @@ function PageSubscriptions({ state, dispatch }) {
                   {s.allow_private_host && <span className="pill mono subscription-local-pill">local source</span>}
                 </div>
                 <div className="right subscription-actions">
-                  <span className="muted-2 mono subscription-runtime">refresh {s.update_interval || "manual"} · last {s.last_updated}</span>
+                  <span className="muted-2 mono subscription-runtime">
+                    refresh {s.update_interval || "manual"} ·{" "}
+                    <span
+                      className={s.last_refresh_failed ? "subscription-last-updated failed" : "subscription-last-updated"}
+                      title={subscriptionRefreshTimeTitle(s.last_updated)}
+                    >
+                      last {lastUpdated}
+                    </span>
+                  </span>
                   <button className="btn sm ghost" onClick={() => dispatch({type:"refreshSub", name: s.name})}><Ic.refresh/> Refresh</button>
                   <button className="btn sm ghost" onClick={() => setOpenSub(s)}><Ic.edit/> Edit</button>
                   <Toggle on={s.enabled} onChange={() => dispatch({type:"togglePool", name:s.name})}/>
