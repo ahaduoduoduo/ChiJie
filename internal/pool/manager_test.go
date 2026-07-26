@@ -217,6 +217,29 @@ func TestSubscriptionPoolLoadsWithFetchError(t *testing.T) {
 	}
 }
 
+func TestSubscriptionPoolLoadsFromPrivateHostWhenConfigured(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNz@proxy.example.com:1080#Local%20Subscription"))
+	}))
+	defer server.Close()
+
+	manager := NewManager()
+	loadedPool, err := manager.buildPool("local-sub", &PoolConfig{
+		Source:           "subscription",
+		URL:              server.URL,
+		AllowPrivateHost: true,
+	})
+	if err != nil {
+		t.Fatalf("build local subscription pool: %v", err)
+	}
+	if loadedPool.Error != "" {
+		t.Fatalf("unexpected subscription error: %s", loadedPool.Error)
+	}
+	if len(loadedPool.Entries) != 1 || loadedPool.Entries[0].Node.Name != "Local Subscription" {
+		t.Fatalf("unexpected subscription entries: %#v", loadedPool.Entries)
+	}
+}
+
 func TestTryOfflineUsesSingleOfflineSubscriptionNode(t *testing.T) {
 	manager := NewManager()
 	nodePool, err := manager.buildPool("sub", &PoolConfig{

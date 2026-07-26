@@ -2,7 +2,7 @@
 
 日期：2026-05-04
 
-更新：2026-07-01
+更新：2026-07-26
 
 ## 目标
 
@@ -15,6 +15,7 @@ Chijie 当前只维护节点池。调用方在请求里声明 `egress.region`、
 `configs/nodes.yaml` 的 subscription 节点池支持：
 
 - `url`：订阅地址。可使用换行、英文逗号或 `|` 填写多个地址。
+- `allow_private_host`：是否允许订阅地址直接使用私网/回环 IP，或使用解析到本地地址的域名；默认 `false`。
 - `update_interval`：自动刷新间隔，例如 `1h`、`12h`、`3d`；留空表示只手动刷新。
 - `try_offline`：某地区只有一个离线订阅节点时，仍允许请求再尝试该节点。
 - `reject_regex`：订阅节点屏蔽正则列表。
@@ -29,7 +30,9 @@ Chijie 当前只维护节点池。调用方在请求里声明 `egress.region`、
 - `residential`：池级家宽标识，设置后该池内节点默认进入家宽地区组。
 - `premium`：池级高端标识，设置后该池内节点默认标记为高端节点。
 
-订阅地址只允许 `http` / `https`，默认拒绝私网、回环、CGNAT 和保留地址。单次订阅响应 body 上限为 4 MB，超过后该订阅地址按失败处理。运行时已有旧节点时，自动刷新或配置重载的最新一次拉取失败不会清空该池节点，系统保留上一次成功拉取的节点并记录池级错误。
+订阅地址只允许 `http` / `https`，默认拒绝私网、回环、CGNAT 和保留地址。受信任的本地订阅源可在对应订阅池设置 `allow_private_host: true`；开启后，直接填写的本地 IP 和解析到本地地址的域名均可用于初次拉取、手动刷新和自动刷新，重定向目标沿用同一设置。该开关会扩大服务端网络访问范围，只应对可信订阅源开启。
+
+单次订阅响应 body 上限为 4 MB，超过后该订阅地址按失败处理。运行时已有旧节点时，自动刷新或配置重载的最新一次拉取失败不会清空该池节点，系统保留上一次成功拉取的节点并记录池级错误。
 
 示例：
 
@@ -40,6 +43,7 @@ node_pools:
     url: |
       https://example.com/sub-a
       https://example.com/sub-b
+    allow_private_host: false
     update_interval: 1h
     try_offline: true
     reject_regex:

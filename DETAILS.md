@@ -24,7 +24,7 @@ chijie/
 │   │   └── logger.go            # 日志分级：Debugf / Infof / Warnf / Errorf，受 log.level 控制
 │   ├── pool/
 │   │   ├── manager.go           # 节点池：静态/模板/订阅/直连池管理、地区组、家宽组、出口选择、模板优先级、家宽降级和离线单节点尝试
-│   │   ├── subscription.go      # 订阅解析：Base64 URI 列表、Clash YAML、纯 URI 列表、Shadowsocks SIP002、多订阅地址、URL 与响应大小限制
+│   │   ├── subscription.go      # 订阅解析：多格式与多地址解析、池级本地地址许可、重定向/拨号校验、URL 与响应大小限制
 │   │   └── health.go            # 健康检查：按池配置后台探测节点连通性、延迟和模板即时测试
 │   ├── dialer/
 │   │   ├── dialer.go            # 统一 Dialer 接口定义、Node 结构、工厂方法
@@ -53,7 +53,7 @@ chijie/
 │   │   ├── icons.jsx            # 控制台图标
 │   │   ├── page-overview.jsx    # Overview：运行状态、节点在线数、成功率、地区组、最近成功和错误请求及详情抽屉
 │   │   ├── page-egress.jsx      # Egress：地区组、节点表、节点启停、测试、静态节点新增/删除
-│   │   ├── page-subscriptions.jsx # Subscriptions：订阅新增、刷新、启停、元数据、reject_regex 保存和窄屏订阅卡片布局
+│   │   ├── page-subscriptions.jsx # Subscriptions：订阅新增、刷新、启停、本地地址许可、元数据、reject_regex 保存和窄屏布局
 │   │   ├── page-templates.jsx   # Templates：模板池新增、编辑、启停、删除、优先级、覆盖范围和按地区测试
 │   │   ├── page-tls.jsx         # TLS Profiles：指纹新增、删除、测试
 │   │   ├── page-traffic.jsx     # Traffic：请求日志、流量序列、详情抽屉、CSV 导出
@@ -240,7 +240,7 @@ JA3/JA4/Akamai 都按 raw 输入保存，测试结果只展示远端返回的真
 ## 安全模型
 
 - **配置文件治理**：`configs/gateway.yaml` 与 `configs/nodes.yaml` 由 `.gitignore` 排除，仓库只保留 `*.example` 模板。启动时校验 `admin.jwt_secret` 非空且非占位、长度 ≥ 16；`admin.password` 为空时仅允许 admin 监听 127.0.0.1/localhost。
-- **SSRF 防护**：`internal/netguard` 维护私网/回环/CGNAT/保留段黑名单（IPv4/IPv6 同时覆盖）。`/proxy`、`/tunnel`、`/api/fingerprints/test` 在解析目标 host 后强制走黑名单校验，直连出口在拨号阶段二次校验防止 DNS rebinding。`gateway.yaml` 的 `server.allow_private_targets: true` 可关闭该防护（默认关闭）。
+- **SSRF 防护**：`internal/netguard` 维护私网/回环/CGNAT/保留段黑名单（IPv4/IPv6 同时覆盖）。`/proxy`、`/tunnel`、`/api/fingerprints/test` 在解析目标 host 后强制走黑名单校验，直连出口在拨号阶段二次校验防止 DNS rebinding。`gateway.yaml` 的 `server.allow_private_targets: true` 可关闭代理目标防护（默认关闭）。订阅拉取独立使用池级 `allow_private_host`，默认拒绝本地地址；开启后同时允许直接 IP、解析到本地地址的域名及其重定向目标。
 - **登录暴力破解防护**：`admin/login_limiter.go` 按客户端 IP 累计失败次数，`login_window` 内达到 `login_max_failures` 后锁定 `login_lockout`，登录成功立即清零。Cloudflare 部署优先使用 `CF-Connecting-IP` / `True-Client-IP`。密码比较使用 `crypto/subtle.ConstantTimeCompare`。
 - **WebSocket Origin 校验**：`/tunnel` 在升级阶段校验 `Origin`：无 Origin（CF Workers / Go / Node.js / curl 等服务端客户端）放行；有 Origin 时必须与请求 `Host` 同源，否则拒绝。该策略阻挡浏览器跨站发起的 CSWSH。
 - **请求与响应大小限制**：`/proxy` 请求 body 上限 10 MB，上游响应 body 上限 32 MB；Admin API 请求 body 上限 1 MB（`http.MaxBytesReader`）；订阅响应 body 上限 4 MB。

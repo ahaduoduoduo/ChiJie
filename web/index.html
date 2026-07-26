@@ -857,6 +857,33 @@
     margin-top: 8px;
     color: var(--fg-1);
   }
+  .subscription-local-pill {
+    color: var(--sig-warn);
+    border-color: rgba(214,168,95,0.24);
+    background: rgba(214,168,95,0.06);
+  }
+  .subscription-network-access {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    padding: 13px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.018);
+    transition: border-color 180ms var(--ease), background 180ms var(--ease);
+  }
+  .subscription-network-access.enabled {
+    border-color: rgba(214,168,95,0.22);
+    background: rgba(214,168,95,0.045);
+  }
+  .subscription-network-access.enabled .field-label {
+    color: var(--sig-warn);
+  }
+  .subscription-network-access .toggle {
+    justify-self: end;
+    white-space: nowrap;
+  }
   .subscription-error-button {
     margin-top: 10px;
     display: flex;
@@ -1172,6 +1199,13 @@
       grid-template-columns: 1fr;
       gap: 20px;
       padding: 16px;
+    }
+    .subscription-network-access {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .subscription-network-access .toggle {
+      justify-self: start;
     }
     .subscription-url {
       max-width: 100%;

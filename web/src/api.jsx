@@ -145,6 +145,7 @@
       residential: !!cfg.residential,
       premium: !!cfg.premium,
       url: cfg.url || "",
+      allow_private_host: !!cfg.allow_private_host,
       update_interval: cfg.update_interval || "",
       try_offline: !!cfg.try_offline,
       last_updated: "runtime",

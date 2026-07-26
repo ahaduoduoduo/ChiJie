@@ -26,16 +26,27 @@ import (
 
 // SubscriptionParser 订阅解析器
 type SubscriptionParser struct {
-	client *http.Client
+	client           *http.Client
+	allowPrivateHost bool
 }
 
 const MaxSubscriptionBodyBytes = 4 * 1024 * 1024
 const subscriptionUserAgent = "clash-verge/v2.0.0"
 
+// SubscriptionParserOptions 控制订阅拉取的网络安全边界。
+type SubscriptionParserOptions struct {
+	AllowPrivateHost bool
+}
+
 func NewSubscriptionParser() *SubscriptionParser {
+	return NewSubscriptionParserWithOptions(SubscriptionParserOptions{})
+}
+
+func NewSubscriptionParserWithOptions(options SubscriptionParserOptions) *SubscriptionParser {
+	baseDial := dnsresolver.NewDialer(10 * time.Second).DialContext
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dnsresolver.NewDialer(10 * time.Second).DialContext,
+		DialContext:           netguard.Guard(baseDial, options.AllowPrivateHost),
 		ForceAttemptHTTP2:     false,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
@@ -45,9 +56,11 @@ func NewSubscriptionParser() *SubscriptionParser {
 	}
 
 	return &SubscriptionParser{
+		allowPrivateHost: options.AllowPrivateHost,
 		client: &http.Client{
-			Timeout:   45 * time.Second,
-			Transport: transport,
+			Timeout:       45 * time.Second,
+			Transport:     transport,
+			CheckRedirect: subscriptionRedirectChecker(options.AllowPrivateHost),
 		},
 	}
 }
@@ -85,7 +98,7 @@ func (p *SubscriptionParser) Fetch(subURL string) ([]dialer.Node, error) {
 }
 
 func (p *SubscriptionParser) fetchOne(subURL string) ([]dialer.Node, error) {
-	if err := validateSubscriptionURL(context.Background(), subURL); err != nil {
+	if err := validateSubscriptionURL(context.Background(), subURL, p.allowPrivateHost); err != nil {
 		return nil, err
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, subURL, nil)
@@ -147,7 +160,7 @@ func subscriptionFetchError(raw string, err error) error {
 	return fmt.Errorf("fetch %s failed: %s", redacted, message)
 }
 
-func validateSubscriptionURL(ctx context.Context, raw string) error {
+func validateSubscriptionURL(ctx context.Context, raw string, allowPrivateHost bool) error {
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("parse subscription url: %w", err)
@@ -160,10 +173,24 @@ func validateSubscriptionURL(ctx context.Context, raw string) error {
 	if parsed.Host == "" {
 		return fmt.Errorf("subscription url has no host")
 	}
-	if err := netguard.CheckHost(ctx, parsed.Hostname()); err != nil {
-		return fmt.Errorf("subscription host is not allowed: %w", err)
+	if !allowPrivateHost {
+		if err := netguard.CheckHost(ctx, parsed.Hostname()); err != nil {
+			return fmt.Errorf("subscription host is not allowed: %w", err)
+		}
 	}
 	return nil
+}
+
+func subscriptionRedirectChecker(allowPrivateHost bool) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		if err := validateSubscriptionURL(req.Context(), req.URL.String(), allowPrivateHost); err != nil {
+			return fmt.Errorf("subscription redirect is not allowed: %w", err)
+		}
+		return nil
+	}
 }
 
 func readSubscriptionBody(resp *http.Response, limit int64) ([]byte, error) {

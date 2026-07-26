@@ -376,8 +376,52 @@ func TestNewSubscriptionParserUsesConservativeHTTPTransport(t *testing.T) {
 }
 
 func TestValidateSubscriptionURLRejectsPrivateHosts(t *testing.T) {
-	if err := validateSubscriptionURL(context.Background(), "http://127.0.0.1/sub"); err == nil {
+	if err := validateSubscriptionURL(context.Background(), "http://127.0.0.1/sub", false); err == nil {
 		t.Fatalf("expected private subscription host to be rejected")
+	}
+}
+
+func TestValidateSubscriptionURLAllowsPrivateIPAndDomainWhenConfigured(t *testing.T) {
+	for _, rawURL := range []string{
+		"http://127.0.0.1/sub",
+		"http://localhost/sub",
+	} {
+		if err := validateSubscriptionURL(context.Background(), rawURL, true); err != nil {
+			t.Fatalf("validate allowed local subscription %q: %v", rawURL, err)
+		}
+	}
+}
+
+func TestFetchAllowsPrivateIPAndDomainWhenConfigured(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNz@example.com:8388#local"))
+	}))
+	defer server.Close()
+
+	for _, subURL := range []string{
+		server.URL + "/sub",
+		strings.Replace(server.URL, "127.0.0.1", "localhost", 1) + "/sub",
+	} {
+		parser := NewSubscriptionParserWithOptions(SubscriptionParserOptions{
+			AllowPrivateHost: true,
+		})
+		nodes, err := parser.Fetch(subURL)
+		if err != nil {
+			t.Fatalf("fetch local subscription %q: %v", subURL, err)
+		}
+		if len(nodes) != 1 || nodes[0].Name != "local" {
+			t.Fatalf("unexpected nodes for %q: %#v", subURL, nodes)
+		}
+	}
+}
+
+func TestSubscriptionRedirectCheckerAppliesPrivateHostSetting(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/sub", nil)
+	if err := subscriptionRedirectChecker(false)(req, nil); err == nil {
+		t.Fatalf("expected redirect to private host to be rejected")
+	}
+	if err := subscriptionRedirectChecker(true)(req, nil); err != nil {
+		t.Fatalf("allow private redirect: %v", err)
 	}
 }
 

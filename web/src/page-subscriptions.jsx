@@ -41,6 +41,7 @@ function PageSubscriptions({ state, dispatch }) {
                   <h3 className="mono">{s.name}</h3>
                   {s.residential && <span className="pill res">residential</span>}
                   {s.try_offline && <span className="pill mono">try offline</span>}
+                  {s.allow_private_host && <span className="pill mono subscription-local-pill">local source</span>}
                 </div>
                 <div className="right subscription-actions">
                   <span className="muted-2 mono subscription-runtime">refresh {s.update_interval || "manual"} · last {s.last_updated}</span>
@@ -189,6 +190,7 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
     residential: !!pool.residential,
     premium: !!pool.premium,
     try_offline: !!pool.try_offline,
+    allow_private_host: !!pool.allow_private_host,
   });
   const regionsFromNodes = (nodes) => Object.fromEntries((nodes || []).map(n => [n.name, n.region || ""]));
   const tagsFromNodes = (nodes) => Object.fromEntries((nodes || []).map(n => [n.name, (n.tags || []).join(", ")]));
@@ -238,6 +240,13 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
           <div className="field"><label className="field-label">Subscription URL(s)</label>
             <textarea className="input mono" value={source.url} onChange={e => setSourceField("url", e.target.value)} style={{minHeight:120}} spellCheck="false"></textarea>
             <div className="field-hint">Multiple URLs separated by newline, comma or |.</div></div>
+          <div className={`subscription-network-access ${source.allow_private_host ? "enabled" : ""}`}>
+            <div>
+              <div className="field-label">Local network access</div>
+              <div className="field-hint">Allow literal private or loopback IPs and domains that resolve to local addresses.</div>
+            </div>
+            <Toggle on={source.allow_private_host} onChange={v => setSourceField("allow_private_host", v)} label="Allow local addresses"/>
+          </div>
           <div className="field-row">
             <SubscriptionIntervalControl value={source.update_interval} onChange={v => setSourceField("update_interval", v)}/>
             <div className="field"><label className="field-label">Class</label>
@@ -255,6 +264,7 @@ function SubEditor({ sub, dispatch, onClose, toast }) {
               const ok = await dispatch({type:"updatePoolConfig", pool: sub.name, patch:{
                 url: source.url.trim(),
                 update_interval: source.update_interval.trim(),
+                allow_private_host: source.allow_private_host,
                 residential: source.residential,
                 premium: source.premium,
                 try_offline: source.try_offline,
@@ -354,6 +364,7 @@ function AddSubscriptionModal({ open, onClose, dispatch, toast }) {
     residential: false,
     premium: false,
     try_offline: false,
+    allow_private_host: false,
     reject_regex: "",
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -364,6 +375,7 @@ function AddSubscriptionModal({ open, onClose, dispatch, toast }) {
       enabled: true,
       url: form.url.trim(),
       update_interval: form.update_interval,
+      allow_private_host: form.allow_private_host,
       residential: form.residential,
       premium: form.premium,
       try_offline: form.try_offline,
@@ -383,6 +395,13 @@ function AddSubscriptionModal({ open, onClose, dispatch, toast }) {
         <div className="field"><label className="field-label">Subscription URL(s)</label>
           <textarea className="input mono" value={form.url} onChange={e => set("url", e.target.value)} placeholder="https://provider/sub?token=..."></textarea>
           <div className="field-hint">Multiple URLs separated by newline, comma or |. Failures don't block working sources.</div></div>
+        <div className={`subscription-network-access ${form.allow_private_host ? "enabled" : ""}`}>
+          <div>
+            <div className="field-label">Local network access</div>
+            <div className="field-hint">Allow literal private or loopback IPs and domains that resolve to local addresses.</div>
+          </div>
+          <Toggle on={form.allow_private_host} onChange={v => set("allow_private_host", v)} label="Allow local addresses"/>
+        </div>
         <div className="field-row">
           <SubscriptionIntervalControl value={form.update_interval} onChange={v => set("update_interval", v)}/>
           <div className="field"><label className="field-label">Class</label>

@@ -467,3 +467,12 @@
 - [x] 地区组不按高端拆分，高端只作为节点标记和选择偏好
 - [x] Admin Egress 和 Subscriptions 页面支持查看、筛选和编辑高端标识
 - [x] README、DETAILS、`docs/premium-egress.md`、参数驱动文档和订阅路由文档补充高端出口说明
+
+## P51 — 订阅池允许本地地址 ✅
+日期：2026-07-26
+
+- [x] subscription 节点池新增 `allow_private_host`，默认保持私网、回环、CGNAT 和保留地址拦截
+- [x] 开启后支持直接填写本地 IP，以及使用解析到本地地址的域名
+- [x] 初次拉取、手动刷新、自动刷新、HTTP 重定向和实际拨号使用同一池级设置
+- [x] Admin 新增与编辑订阅界面增加 `Allow local addresses` 开关，并在订阅卡片显示 `local source`
+- [x] 补充后端测试、示例配置、README、DETAILS 和订阅路由文档

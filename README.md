@@ -106,7 +106,7 @@ proxy:
 
 `/proxy` 单次请求 body 上限 10 MB，上游响应 body 上限 32 MB；Admin API JSON body 上限 1 MB。
 
-订阅拉取只允许 `http` / `https`，默认拒绝私网/回环/保留地址，单次订阅响应 body 上限 4 MB。
+订阅拉取只允许 `http` / `https`，默认拒绝私网/回环/保留地址；受信任的订阅池可单独设置 `allow_private_host: true`，允许直接填写本地 IP，或使用解析到本地地址的域名。单次订阅响应 body 上限 4 MB。
 
 出口节点拨号、订阅地址校验和 sing-box DNSRouter 使用内置公共 DNS resolver，默认查询 `1.1.1.1:53` 和 `8.8.8.8:53`，避免 Docker 内置 `127.0.0.11` 解析失败影响节点可用性。
 
@@ -142,7 +142,7 @@ Docker Hub 自动发布详见 [docs/dockerhub-release.md](docs/dockerhub-release
 
 `vmess` / `vless` / `trojan` 支持常见 V2Ray 传输参数：TCP、WebSocket、gRPC、HTTP/H2、HTTPUpgrade、QUIC。`vless` 支持 TLS、Reality 和 `xhttp` / `splithttp` 的 `packet-up`、`stream-up` 模式；`hysteria2` 支持 Shadowrocket 常见的 `mport=16001-17000` 端口跳跃写法；`anytls` / `tuic` 使用 sing-box outbound 并默认启用 TLS。Clash YAML 的 `fingerprint` 会作为证书 SHA-256 pinning 指纹保留，不再当成 uTLS 指纹传给 sing-box；订阅中的未知 uTLS 指纹值会被忽略，避免正常节点被跳过。当前 sing-box 版本不原生支持 `xhttp` / `splithttp`，`vless+xhttp` 由 Chijie 的专用拨号器接入；其他协议的 `xhttp` 节点会被跳过并在订阅池错误信息中展示原因。Reality 和订阅中的 `fp/client-fingerprint` 需要使用 `-tags with_utls` 构建，`./build.sh` 已默认启用。
 
-订阅导入支持 Clash YAML、Base64 URI 列表、未 Base64 包装的纯 URI 列表。URI 列表支持 `ss`、`vmess`、`vless`、`trojan`、`hysteria2` / `hy2`、`anytls` 和 `tuic`。Shadowsocks URI 支持 `ss://userinfo@host:port?plugin=...` 和 SIP002 常见的 `ss://userinfo@host:port/?plugin=...` 写法；`simple-obfs` 插件名会规范化为 sing-box 可识别的 `obfs-local`。订阅拉取使用 `clash-verge/v2.0.0` User-Agent，以兼容会按客户端 UA 返回不同节点集合的订阅服务。单个订阅池可填写多个订阅地址，使用换行、英文逗号或 `|` 分隔；部分订阅地址失败时，已成功解析的节点仍会进入该池。订阅地址必须是 `http` / `https` 公网目标，响应体超过 4 MB 时会拒绝解析。
+订阅导入支持 Clash YAML、Base64 URI 列表、未 Base64 包装的纯 URI 列表。URI 列表支持 `ss`、`vmess`、`vless`、`trojan`、`hysteria2` / `hy2`、`anytls` 和 `tuic`。Shadowsocks URI 支持 `ss://userinfo@host:port?plugin=...` 和 SIP002 常见的 `ss://userinfo@host:port/?plugin=...` 写法；`simple-obfs` 插件名会规范化为 sing-box 可识别的 `obfs-local`。订阅拉取使用 `clash-verge/v2.0.0` User-Agent，以兼容会按客户端 UA 返回不同节点集合的订阅服务。单个订阅池可填写多个订阅地址，使用换行、英文逗号或 `|` 分隔；部分订阅地址失败时，已成功解析的节点仍会进入该池。订阅地址必须使用 `http` / `https`；默认只允许公网目标，池级 `allow_private_host: true` 可允许私网、回环和保留地址。响应体超过 4 MB 时会拒绝解析。
 
 订阅池的 `update_interval` 支持 `30m`、`12h`、`3d`，留空表示只手动刷新。自动刷新或配置重载时，如果最近一次拉取失败，运行时保留上一次成功拉取的节点并记录池级错误。
 

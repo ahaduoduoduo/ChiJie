@@ -27,18 +27,19 @@ type PoolConfig struct {
 	Enabled           *bool               `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Residential       bool                `yaml:"residential,omitempty" json:"residential,omitempty"`
 	Premium           bool                `yaml:"premium,omitempty" json:"premium,omitempty"`
-	URL               string              `yaml:"url" json:"url"`                                         // 订阅链接（subscription）
-	UpdateInterval    string              `yaml:"update_interval" json:"update_interval"`                 // 订阅更新间隔
-	Filter            *FilterConfig       `yaml:"filter" json:"filter"`                                   // 节点过滤
-	HealthCheck       *HealthCheckConfig  `yaml:"health_check" json:"health_check"`                       // 健康检查配置
-	TryOffline        bool                `yaml:"try_offline,omitempty" json:"try_offline,omitempty"`     // 唯一地区节点离线时仍尝试
-	Nodes             []dialer.Node       `yaml:"nodes" json:"nodes"`                                     // 静态节点列表
-	DisabledNodes     []string            `yaml:"disabled_nodes" json:"disabled_nodes"`                   // 禁用节点名
-	TemplateType      string              `yaml:"template_type,omitempty" json:"template_type,omitempty"` // proxy, chijie
-	Type              string              `yaml:"type" json:"type"`                                       // 代理模板类型（template）
-	Server            string              `yaml:"server" json:"server"`                                   // 模板服务器
-	Port              int                 `yaml:"port" json:"port"`                                       // 模板端口
-	Endpoint          string              `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`           // 远端 Chijie HTTPS 地址
+	URL               string              `yaml:"url" json:"url"`                                                   // 订阅链接（subscription）
+	AllowPrivateHost  bool                `yaml:"allow_private_host,omitempty" json:"allow_private_host,omitempty"` // 允许订阅地址使用私网、回环或保留地址
+	UpdateInterval    string              `yaml:"update_interval" json:"update_interval"`                           // 订阅更新间隔
+	Filter            *FilterConfig       `yaml:"filter" json:"filter"`                                             // 节点过滤
+	HealthCheck       *HealthCheckConfig  `yaml:"health_check" json:"health_check"`                                 // 健康检查配置
+	TryOffline        bool                `yaml:"try_offline,omitempty" json:"try_offline,omitempty"`               // 唯一地区节点离线时仍尝试
+	Nodes             []dialer.Node       `yaml:"nodes" json:"nodes"`                                               // 静态节点列表
+	DisabledNodes     []string            `yaml:"disabled_nodes" json:"disabled_nodes"`                             // 禁用节点名
+	TemplateType      string              `yaml:"template_type,omitempty" json:"template_type,omitempty"`           // proxy, chijie
+	Type              string              `yaml:"type" json:"type"`                                                 // 代理模板类型（template）
+	Server            string              `yaml:"server" json:"server"`                                             // 模板服务器
+	Port              int                 `yaml:"port" json:"port"`                                                 // 模板端口
+	Endpoint          string              `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`                     // 远端 Chijie HTTPS 地址
 	BearerToken       string              `yaml:"bearer_token,omitempty" json:"bearer_token,omitempty"`
 	UsernameTemplate  string              `yaml:"username_template" json:"username_template"` // 用户名模板
 	Password          string              `yaml:"password" json:"password"`                   // 模板密码
@@ -230,7 +231,9 @@ func (m *Manager) buildPool(name string, cfg *PoolConfig) (*Pool, error) {
 		// 模板池不预创建节点，按需动态生成。这里只保存配置。
 
 	case "subscription":
-		parser := NewSubscriptionParser()
+		parser := NewSubscriptionParserWithOptions(SubscriptionParserOptions{
+			AllowPrivateHost: cfg.AllowPrivateHost,
+		})
 		nodes, err := parser.Fetch(cfg.URL)
 		if err != nil {
 			pool.Error = fmt.Sprintf("fetch subscription: %v", err)
@@ -934,7 +937,9 @@ func (m *Manager) RefreshSubscription(poolName string) error {
 		return fmt.Errorf("pool %s is not a subscription pool", poolName)
 	}
 
-	parser := NewSubscriptionParser()
+	parser := NewSubscriptionParserWithOptions(SubscriptionParserOptions{
+		AllowPrivateHost: pool.Config.AllowPrivateHost,
+	})
 	nodes, err := parser.Fetch(pool.Config.URL)
 	if err != nil {
 		pool.mu.Lock()

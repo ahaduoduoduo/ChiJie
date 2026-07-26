@@ -31,6 +31,8 @@ node_pools:
     subscription-example:
         source: subscription
         url: https://your-subscription-host/path?token=REPLACE_WITH_TOKEN
+        # 允许直接填写本地 IP，或使用解析到私网/回环地址的域名。仅对可信订阅源开启。
+        allow_private_host: false
         # 留空表示手动刷新；也支持 12h、3d 这类小时/天配置。
         update_interval: 1h
         # 设置为 true 后，该订阅池下节点默认都是高端节点。
