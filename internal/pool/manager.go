@@ -84,11 +84,13 @@ type NodeEntry struct {
 
 // Pool 节点池
 type Pool struct {
-	Name    string
-	Config  *PoolConfig
-	Entries []*NodeEntry
-	Error   string
-	mu      sync.RWMutex
+	Name              string
+	Config            *PoolConfig
+	Entries           []*NodeEntry
+	Error             string
+	LastRefreshAt     time.Time
+	LastRefreshFailed bool
+	mu                sync.RWMutex
 }
 
 // Manager 节点池管理器
@@ -236,8 +238,9 @@ func (m *Manager) buildPool(name string, cfg *PoolConfig) (*Pool, error) {
 		})
 		nodes, err := parser.Fetch(cfg.URL)
 		if err != nil {
-			pool.Error = fmt.Sprintf("fetch subscription: %v", err)
-			log.Printf("pool %s: %s", name, pool.Error)
+			message := fmt.Sprintf("fetch subscription: %v", err)
+			pool.recordSubscriptionRefreshFailure(message)
+			log.Printf("pool %s: %s", name, message)
 			return pool, nil
 		}
 
@@ -248,14 +251,13 @@ func (m *Manager) buildPool(name string, cfg *PoolConfig) (*Pool, error) {
 		var filterErr error
 		nodes, filterErr = applyRejectRegexes(nodes, cfg.RejectRegex)
 		if filterErr != nil {
-			pool.Error = filterErr.Error()
-			log.Printf("pool %s: %s", name, pool.Error)
+			pool.recordSubscriptionRefreshFailure(filterErr.Error())
+			log.Printf("pool %s: %s", name, filterErr)
 			return pool, nil
 		}
 
 		entries, warning := buildSubscriptionEntries(nodes, cfg)
-		pool.Entries = entries
-		pool.Error = warning
+		pool.recordSubscriptionRefreshSuccess(entries, warning)
 		log.Printf("pool %s: loaded %d nodes from subscription", name, len(pool.Entries))
 
 	default:
@@ -284,9 +286,18 @@ func previousSubscriptionPool(name string, cfg *PoolConfig, oldPools map[string]
 }
 
 func preserveSubscriptionEntriesOnError(name string, cfg *PoolConfig, current *Pool, previous *Pool) *Pool {
-	if cfg == nil || cfg.Source != "subscription" || current == nil || current.Error == "" || previous == nil {
+	if cfg == nil || cfg.Source != "subscription" || current == nil || previous == nil {
 		return nil
 	}
+	current.mu.RLock()
+	currentError := current.Error
+	lastRefreshAt := current.LastRefreshAt
+	lastRefreshFailed := current.LastRefreshFailed
+	current.mu.RUnlock()
+	if !lastRefreshFailed {
+		return nil
+	}
+
 	previous.mu.RLock()
 	defer previous.mu.RUnlock()
 	if len(previous.Entries) == 0 {
@@ -306,12 +317,14 @@ func preserveSubscriptionEntriesOnError(name string, cfg *PoolConfig, current *P
 	if len(entries) == 0 {
 		return nil
 	}
-	log.Printf("pool %s: keeping %d previous subscription nodes after refresh error: %s", name, len(entries), current.Error)
+	log.Printf("pool %s: keeping %d previous subscription nodes after refresh error: %s", name, len(entries), currentError)
 	return &Pool{
-		Name:    name,
-		Config:  cfg,
-		Entries: entries,
-		Error:   current.Error,
+		Name:              name,
+		Config:            cfg,
+		Entries:           entries,
+		Error:             currentError,
+		LastRefreshAt:     lastRefreshAt,
+		LastRefreshFailed: lastRefreshFailed,
 	}
 }
 
@@ -942,9 +955,7 @@ func (m *Manager) RefreshSubscription(poolName string) error {
 	})
 	nodes, err := parser.Fetch(pool.Config.URL)
 	if err != nil {
-		pool.mu.Lock()
-		pool.Error = fmt.Sprintf("fetch subscription: %v", err)
-		pool.mu.Unlock()
+		pool.recordSubscriptionRefreshFailure(fmt.Sprintf("fetch subscription: %v", err))
 		return fmt.Errorf("fetch subscription: %w", err)
 	}
 
@@ -953,18 +964,12 @@ func (m *Manager) RefreshSubscription(poolName string) error {
 	}
 	nodes, err = applyRejectRegexes(nodes, pool.Config.RejectRegex)
 	if err != nil {
-		pool.mu.Lock()
-		pool.Error = err.Error()
-		pool.mu.Unlock()
+		pool.recordSubscriptionRefreshFailure(err.Error())
 		return err
 	}
 
 	entries, warning := buildSubscriptionEntries(nodes, pool.Config)
-
-	pool.mu.Lock()
-	pool.Entries = entries
-	pool.Error = warning
-	pool.mu.Unlock()
+	pool.recordSubscriptionRefreshSuccess(entries, warning)
 
 	log.Printf("pool %s: refreshed %d nodes", poolName, len(entries))
 	return nil
@@ -1087,135 +1092,6 @@ func (m *Manager) StopSubscriptionUpdater() {
 	m.updaterWG.Wait()
 }
 
-// PoolStatus 节点池状态（供 Admin API 使用）
-type PoolStatus struct {
-	Name         string              `json:"name"`
-	Source       string              `json:"source"`
-	Config       *PoolConfig         `json:"config,omitempty"`
-	Error        string              `json:"error,omitempty"`
-	RegionGroups []RegionGroupStatus `json:"region_groups,omitempty"`
-	Nodes        []NodeStatus        `json:"nodes"`
-}
-
-// RegionGroupStatus 订阅节点按地区分组后的状态
-type RegionGroupStatus struct {
-	Group       string `json:"group"`
-	Region      string `json:"region"`
-	Name        string `json:"name"`
-	Residential bool   `json:"residential"`
-	Count       int    `json:"count"`
-	Online      int    `json:"online"`
-}
-
-// NodeStatus 单个节点状态
-type NodeStatus struct {
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	Server      string            `json:"server"`
-	Port        int               `json:"port"`
-	Username    string            `json:"username,omitempty"`
-	Password    string            `json:"password,omitempty"`
-	Extra       map[string]string `json:"extra,omitempty"`
-	Region      string            `json:"region,omitempty"`
-	RegionGroup string            `json:"region_group,omitempty"`
-	Residential bool              `json:"residential"`
-	Premium     bool              `json:"premium,omitempty"`
-	Alias       string            `json:"alias,omitempty"`
-	Tags        []string          `json:"tags,omitempty"`
-	Enabled     bool              `json:"enabled"`
-	Alive       bool              `json:"alive"`
-	Latency     string            `json:"latency"`
-	FailCount   int               `json:"fail_count"`
-}
-
-// GetPoolStatus 返回所有池的详细状态
-func (m *Manager) GetPoolStatus() []PoolStatus {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	result := make([]PoolStatus, 0, len(m.pools))
-	for name, pool := range m.pools {
-		ps := PoolStatus{
-			Name:   name,
-			Source: pool.Config.Source,
-			Config: pool.Config,
-		}
-
-		pool.mu.RLock()
-		ps.Error = pool.Error
-		groupMap := make(map[string]*RegionGroupStatus)
-		for _, e := range pool.Entries {
-			ns := NodeStatus{
-				Name:        e.Node.Name,
-				Type:        e.Node.Type,
-				Server:      e.Node.Server,
-				Port:        e.Node.Port,
-				Username:    e.Node.Username,
-				Password:    e.Node.Password,
-				Extra:       e.Node.Extra,
-				Region:      e.Region,
-				RegionGroup: EgressGroup(e.Region, e.Residential),
-				Residential: e.Residential,
-				Premium:     e.Premium,
-				Alias:       e.Alias,
-				Tags:        e.Tags,
-				Enabled:     e.Enabled,
-				Alive:       e.Alive,
-				FailCount:   e.FailCount,
-			}
-			if e.Latency > 0 {
-				ns.Latency = e.Latency.String()
-			}
-			ps.Nodes = append(ps.Nodes, ns)
-			groupRegion := EgressGroup(e.Region, e.Residential)
-			group := groupMap[groupRegion]
-			if group == nil {
-				group = &RegionGroupStatus{
-					Group:       groupRegion,
-					Region:      e.Region,
-					Name:        groupNameForRegion(e.Region, EgressSelector{Residential: e.Residential}, pool.Config),
-					Residential: e.Residential,
-				}
-				groupMap[groupRegion] = group
-			}
-			group.Count++
-			if e.Enabled && e.Alive {
-				group.Online++
-			}
-		}
-		for region, groupName := range pool.Config.RegionGroupNames {
-			normalized := normalizeRegionCode(region)
-			if normalized == "" {
-				normalized = strings.ToUpper(strings.TrimSpace(region))
-			}
-			if normalized == "" {
-				continue
-			}
-			selector := EgressSelector{Residential: pool.Config.Residential}
-			groupCode := EgressGroupFor(normalized, selector)
-			if groupMap[groupCode] == nil {
-				groupMap[groupCode] = &RegionGroupStatus{
-					Group:       groupCode,
-					Region:      normalized,
-					Name:        groupName,
-					Residential: pool.Config.Residential,
-				}
-			}
-		}
-		ps.RegionGroups = sortedRegionGroups(groupMap)
-		pool.mu.RUnlock()
-
-		result = append(result, ps)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Source != result[j].Source {
-			return result[i].Source < result[j].Source
-		}
-		return result[i].Name < result[j].Name
-	})
-	return result
-}
-
 // SetNodeEnabled 更新运行时节点启停状态。
 func (m *Manager) SetNodeEnabled(poolName, nodeName string, enabled bool) error {
 	m.mu.RLock()
@@ -1307,68 +1183,6 @@ func newNodeEntry(node *dialer.Node, d dialer.Dialer, cfg *PoolConfig) *NodeEntr
 	}
 }
 
-func residentialForNode(node *dialer.Node, cfg *PoolConfig, tags []string) bool {
-	return node.Residential || (cfg != nil && cfg.Residential) || util.ContainsString(tags, "residential")
-}
-
-func premiumForNode(node *dialer.Node, cfg *PoolConfig, tags []string) bool {
-	return node.Premium || (cfg != nil && cfg.Premium) || util.ContainsString(tags, "premium") || util.ContainsString(tags, "high-end")
-}
-
-func tagsForNode(node *dialer.Node, cfg *PoolConfig) []string {
-	tags := make([]string, 0)
-	if cfg != nil {
-		tags = append(tags, cfg.Tags...)
-		if cfg.NodeServerTags != nil {
-			tags = append(tags, cfg.NodeServerTags[nodeServerKey(node)]...)
-		}
-		if cfg.NodeTags != nil {
-			tags = append(tags, cfg.NodeTags[node.Name]...)
-		}
-	}
-	tags = append(tags, node.Tags...)
-	tags = append(tags, detectTagsFromNodeName(node.Name)...)
-	return normalizeTags(tags)
-}
-
-func detectTagsFromNodeName(name string) []string {
-	lower := strings.ToLower(name)
-	tags := make([]string, 0, 2)
-	if strings.Contains(name, "家宽") ||
-		strings.Contains(name, "住宅") ||
-		strings.Contains(name, "家庭宽带") ||
-		strings.Contains(lower, "residential") ||
-		strings.Contains(lower, "resi") ||
-		strings.Contains(lower, "home-broadband") ||
-		strings.Contains(lower, "home broadband") {
-		tags = append(tags, "residential")
-	}
-	if strings.Contains(name, "高端") ||
-		strings.Contains(lower, "premium") ||
-		strings.Contains(lower, "high-end") ||
-		strings.Contains(lower, "high end") {
-		tags = append(tags, "premium")
-	}
-	return tags
-}
-
-func normalizeTags(tags []string) []string {
-	result := make([]string, 0, len(tags))
-	seen := map[string]bool{}
-	for _, tag := range tags {
-		tag = strings.ToLower(strings.TrimSpace(tag))
-		tag = strings.ReplaceAll(tag, " ", "-")
-		tag = strings.ReplaceAll(tag, "_", "-")
-		if tag == "" || seen[tag] {
-			continue
-		}
-		seen[tag] = true
-		result = append(result, tag)
-	}
-	sort.Strings(result)
-	return result
-}
-
 // NormalizeRegionCode 对外提供二字母地区码标准化。
 func NormalizeRegionCode(value string) string {
 	region := normalizeRegionCode(value)
@@ -1437,81 +1251,6 @@ func regionForNode(node *dialer.Node, cfg *PoolConfig) string {
 		}
 	}
 	return detectRegionFromNodeName(node.Name)
-}
-
-func aliasForNode(node *dialer.Node, cfg *PoolConfig) string {
-	if cfg == nil {
-		return ""
-	}
-	if cfg.NodeServerAliases != nil {
-		if alias := strings.TrimSpace(cfg.NodeServerAliases[nodeServerKey(node)]); alias != "" {
-			return alias
-		}
-	}
-	for alias, target := range cfg.NodeAliases {
-		if target == node.Name {
-			return alias
-		}
-	}
-	return ""
-}
-
-func nodeServerKey(node *dialer.Node) string {
-	if node == nil {
-		return ""
-	}
-	return ServerKey(node.Server, node.Port)
-}
-
-// ServerKey 返回节点 server 映射使用的稳定键。
-func ServerKey(server string, port int) string {
-	server = strings.TrimSpace(strings.ToLower(server))
-	if server == "" {
-		return ""
-	}
-	if port > 0 {
-		return fmt.Sprintf("%s:%d", server, port)
-	}
-	return server
-}
-
-func groupNameForRegion(region string, selector EgressSelector, cfg *PoolConfig) string {
-	normalized := normalizeRegionCode(region)
-	if normalized == "" {
-		normalized = strings.ToUpper(strings.TrimSpace(region))
-	}
-	if normalized == "" {
-		normalized = "UN"
-	}
-	if cfg != nil && cfg.RegionGroupNames != nil {
-		if name := strings.TrimSpace(cfg.RegionGroupNames[normalized]); name != "" {
-			return name
-		}
-	}
-	if name := regionCodeToName[normalized]; name != "" {
-		if selector.Residential {
-			return name + "-RES"
-		}
-		return name
-	}
-	if selector.Residential {
-		return normalized + "-RES"
-	}
-	return normalized
-}
-
-func sortedRegionGroups(groups map[string]*RegionGroupStatus) []RegionGroupStatus {
-	keys := make([]string, 0, len(groups))
-	for key := range groups {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	result := make([]RegionGroupStatus, 0, len(keys))
-	for _, key := range keys {
-		result = append(result, *groups[key])
-	}
-	return result
 }
 
 func applyRejectRegexes(nodes []dialer.Node, patterns []string) ([]dialer.Node, error) {
