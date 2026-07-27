@@ -4,7 +4,7 @@
 chijie/
 ├── .github/
 │   └── workflows/
-│       └── dockerhub.yml        # GitHub Actions：构建 Linux AMD64 镜像并推送 Docker Hub
+│       └── dockerhub.yml        # GitHub Actions：构建并推送 Linux AMD64 镜像，成功后受限 SSH 部署 CN211
 ├── cmd/
 │   └── gateway/
 │       ├── main.go              # 入口：加载/校验配置、初始化各模块、启动并优雅关闭 HTTP 与 Admin 服务
@@ -81,7 +81,7 @@ chijie/
 ├── docs/
 │   ├── admin-frontend.md          # Admin 前端接入、构建方式和接口边界
 │   ├── docker-deployment.md       # Docker 构建、Compose 部署和端口模型
-│   ├── dockerhub-release.md       # Docker Hub 自动发布、Secrets 和 VPS 拉取镜像部署
+│   ├── dockerhub-release.md       # Docker Hub 自动发布、production Environment 和 CN211 受限 SSH 部署
 │   ├── parameter-driven-egress.md # 参数驱动出口模型
 │   ├── premium-egress.md          # 高端出口节点配置和请求语义
 │   ├── proxy-client-usage.md      # 外部服务接入 Proxy API 的独立使用文档

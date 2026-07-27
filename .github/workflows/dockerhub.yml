@@ -39,3 +39,36 @@ jobs:
             org.opencontainers.image.description=Chijie HTTP-to-proxy gateway
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-cn211:
+    name: Deploy CN211
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure restricted SSH
+        shell: bash
+        env:
+          DEPLOY_KEY: ${{ secrets.CN211_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.CN211_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          install -m 600 /dev/null "$HOME/.ssh/chijie-deploy"
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/chijie-deploy"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+
+      - name: Pull image and deploy CHIJIE
+        run: |
+          ssh \
+            -i "$HOME/.ssh/chijie-deploy" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -p "${{ vars.CN211_PORT }}" \
+            "${{ vars.CN211_USER }}@${{ vars.CN211_HOST }}"
+
+      - name: Remove deployment key
+        if: always()
+        run: rm -f "$HOME/.ssh/chijie-deploy"
