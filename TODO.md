@@ -476,3 +476,11 @@
 - [x] 初次拉取、手动刷新、自动刷新、HTTP 重定向和实际拨号使用同一池级设置
 - [x] Admin 新增与编辑订阅界面增加 `Allow local addresses` 开关，并在订阅卡片显示 `local source`
 - [x] 补充后端测试、示例配置、README、DETAILS 和订阅路由文档
+
+## P52 — CN211 自动部署 ✅
+日期：2026-07-27
+
+- [x] Docker Hub 镜像构建成功后自动触发 CN211 部署
+- [x] 使用独立 SSH 密钥、固定主机密钥和 forced command 限制部署权限
+- [x] 服务端部署脚本串行更新容器、等待健康检查并支持失败恢复
+- [x] 补充 production Environment、服务器部署目录和手动更新文档

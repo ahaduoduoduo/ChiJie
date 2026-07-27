@@ -31,6 +31,25 @@ DOCKERHUB_TOKEN
 
 `DOCKERHUB_USERNAME` 填 Docker Hub 用户名。`DOCKERHUB_TOKEN` 填 Docker Hub Access Token，权限需要 `Read & Write`。
 
+生产服务器自动部署使用 GitHub `production` Environment，并配置：
+
+Secrets：
+
+```text
+CN211_DEPLOY_KEY
+CN211_KNOWN_HOSTS
+```
+
+Variables：
+
+```text
+CN211_HOST
+CN211_PORT
+CN211_USER
+```
+
+`CN211_DEPLOY_KEY` 是独立部署密钥，不使用日常管理服务器的 SSH 密钥。服务端公钥使用 forced command 和 `restrict` 限制，只允许调用固定的 CHIJIE 部署脚本；任意 SSH 命令都会被忽略。`CN211_KNOWN_HOSTS` 固定服务器 ED25519 主机密钥，工作流启用严格主机密钥校验。
+
 ## Workflow
 
 工作流文件：
@@ -52,6 +71,14 @@ DOCKERHUB_TOKEN
 ```
 
 当前只构建 `linux/amd64`，匹配 X86 VPS。
+
+镜像构建并推送成功后，`deploy-cn211` job 通过受限 SSH 连接 CN211。服务器端脚本串行执行以下操作：
+
+1. 拉取 `ahaduoduoduo/chijie:latest`。
+2. 使用 `/opt/chijie/compose.yaml` 更新容器并等待健康检查通过。
+3. 更新失败时尝试恢复更新前的本地镜像。
+
+服务器上的 `/opt/chijie/config` 是持久化配置目录，镜像更新不会修改其中的 YAML 文件。
 
 ## VPS 运行
 
@@ -90,15 +117,12 @@ Admin 继续使用 SSH tunnel：
 ssh -L 9090:127.0.0.1:19090 root@your-vps
 ```
 
-## 更新
+## 手动更新
 
-新代码推送到 GitHub 后，等待 Actions 构建成功。VPS 执行：
+正常更新由 GitHub Actions 自动完成。需要在服务器上手动执行时：
 
 ```bash
-cd /www/wwwroot/proxy.infiniteapi.com/app
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-docker compose -f docker-compose.prod.yml logs -f chijie
+sudo /usr/local/sbin/deploy-chijie
 ```
 
-配置文件挂载自宿主机 `configs/`，镜像更新不会覆盖 `gateway.yaml`、`nodes.yaml` 和 `fingerprints.yaml`。
+CN211 配置文件挂载自宿主机 `/opt/chijie/config`，镜像更新不会覆盖 `gateway.yaml`、`nodes.yaml` 和 `fingerprints.yaml`。
