@@ -15,6 +15,7 @@ traffic:
 
 - `enabled` 默认 `true`。
 - `retention_days` 默认 `7`，范围为 1–3650。
+- Admin System 页面的 Logging 卡片可修改保留天数；Traffic 页面只负责日志查看、加载和导出。
 - 内存最多保留并向 Admin 提供最近 1000 条原始 trace；磁盘文件按配置保留完整日期范围。
 - Docker 默认将 `/config` 映射到宿主机配置目录，因此 `.runtime` 会随同配置目录跨容器重启保留。
 

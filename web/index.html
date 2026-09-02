@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <title>Chijie</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -225,6 +225,7 @@
     cursor: pointer;
     display: inline-flex; align-items: center; gap: 6px;
     font-family: inherit;
+    white-space: nowrap;
     transition: all 200ms var(--ease);
     box-shadow: var(--shadow-sm);
   }
@@ -456,6 +457,18 @@
   .field-label { font-size: 11.5px; color: var(--fg-2); font-weight: 450; }
   .field-hint { font-size: 11.5px; color: var(--fg-3); line-height: 1.5; }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .system-retention-control { align-items: center; }
+  .system-retention-control .input { width: 92px; flex: 0 0 92px; }
+  .traffic-log-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 16px;
+    border-top: 1px solid var(--line);
+  }
+  .traffic-log-footer .btn { flex: 0 0 auto; }
+  .traffic-log-footer-copy { min-width: 0; font-size: 11px; }
 
   /* Toggle */
   .toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
@@ -1054,6 +1067,17 @@
     .page-h-actions .btn {
       flex: 1 1 148px;
       justify-content: center;
+    }
+    .traffic-log-footer {
+      justify-content: flex-start;
+      padding: 14px;
+    }
+    .traffic-log-footer .btn {
+      flex: 0 0 auto;
+    }
+    .traffic-log-footer-copy {
+      flex: 1 1 auto;
+      line-height: 1.45;
     }
     .card {
       border-radius: 8px;

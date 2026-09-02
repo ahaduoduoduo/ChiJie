@@ -5,6 +5,7 @@ function PageSystem({ state, dispatch }) {
   const [logLevel, setLogLevel] = React.useState("info");
   const [tokenOpen, setTokenOpen] = React.useState(false);
   const [savingLog, setSavingLog] = React.useState(false);
+  const [savingRetention, setSavingRetention] = React.useState(false);
   const [savingHealth, setSavingHealth] = React.useState(false);
   const [savingProxy, setSavingProxy] = React.useState(false);
   const [healthDirty, setHealthDirty] = React.useState(false);
@@ -27,12 +28,18 @@ function PageSystem({ state, dispatch }) {
   const runtime = stats.runtime || {};
   const health = stats.health_check || {};
   const proxy = stats.proxy || {};
+  const configuredRetention = Number(state.traffic?.config?.persistence?.retention_days || 7);
+  const [retentionDays, setRetentionDays] = React.useState(configuredRetention);
   const tokenHours = state.auth?.seconds ? Math.max(1, Math.round(state.auth.seconds / 3600)) : 0;
   const toast = useToast();
 
   React.useEffect(() => {
     if (runtime.log_level) setLogLevel(runtime.log_level);
   }, [runtime.log_level]);
+
+  React.useEffect(() => {
+    setRetentionDays(configuredRetention);
+  }, [configuredRetention]);
 
   React.useEffect(() => {
     if (healthDirty) return;
@@ -77,6 +84,21 @@ function PageSystem({ state, dispatch }) {
       toast(err.message);
     } finally {
       setSavingLog(false);
+    }
+  };
+
+  const saveRetention = async () => {
+    setSavingRetention(true);
+    try {
+      await dispatch({
+        type: "updateTrafficSettings",
+        settings: {
+          enabled: true,
+          retention_days: Math.max(1, Math.min(3650, Number(retentionDays) || 7)),
+        },
+      });
+    } finally {
+      setSavingRetention(false);
     }
   };
 
@@ -243,6 +265,16 @@ function PageSystem({ state, dispatch }) {
 	            </div>
 	            <div className="field" style={{marginTop:16}}><label className="field-label">Output</label>
 	              <input className="input mono" readOnly value={runtime.log_output || "stdout"}/></div>
+	            <div className="field" style={{marginTop:16}}>
+	              <label className="field-label">Request log retention</label>
+	              <div className="row gap-12 system-retention-control">
+	                <input className="input mono" type="number" min="1" max="3650" value={retentionDays}
+	                  onChange={e => setRetentionDays(e.target.value)} aria-label="Request log retention days"/>
+	                <span className="field-hint">days</span>
+	                <button className="btn" disabled={savingRetention || Number(retentionDays) === configuredRetention} onClick={saveRetention}>Save</button>
+	              </div>
+	              <div className="field-hint">Daily request-log files are kept for 1–3650 days.</div>
+	            </div>
 	            {savingLog && <div className="field-hint" style={{marginTop:10}}>Saving log level…</div>}
 	          </div>
         </div>

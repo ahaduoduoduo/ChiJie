@@ -8,9 +8,6 @@ function PageTraffic({ state, dispatch, busy }) {
   const [open, setOpen] = React.useState(null);
   const [expanded, setExpanded] = React.useState({});
   const configuredRetention = Number(traffic.config?.persistence?.retention_days || 7);
-  const [retentionDays, setRetentionDays] = React.useState(configuredRetention);
-
-  React.useEffect(() => setRetentionDays(configuredRetention), [configuredRetention]);
 
   const metrics = traffic.metrics || {};
   const effectiveTotal = Number(metrics.requests ?? traffic.requests.length);
@@ -43,10 +40,6 @@ function PageTraffic({ state, dispatch, busy }) {
   const toggleExpanded = (id) => setExpanded(s => ({ ...s, [id]: !s[id] }));
   const saveGroupingRule = (rule) => dispatch?.({ type: "addTrafficGroupingRule", rule });
   const saveSuccessFoldingRule = (rule) => dispatch?.({ type: "addTrafficSuccessFoldingRule", rule });
-  const saveRetention = () => dispatch?.({
-    type: "updateTrafficSettings",
-    settings: { enabled: true, retention_days: Math.max(1, Math.min(3650, Number(retentionDays) || 7)) },
-  });
   const exportCSV = () => {
     const header = ["time","type","method","url","region","pool","node","status","duration_ms","bytes","count","error"];
     const lines = rows.map(r => [
@@ -70,13 +63,6 @@ function PageTraffic({ state, dispatch, busy }) {
           <p>Effective request log for HTTP and tunnel egress. Repeated failures with the same URL and region are merged into one row.</p>
         </div>
         <div className="page-h-actions">
-          <div className="row" style={{gap:6}}>
-            <span className="muted-2" style={{fontSize:11.5}}>Keep</span>
-            <input className="input mono" type="number" min="1" max="3650" value={retentionDays}
-              onChange={e => setRetentionDays(e.target.value)} style={{width:68, height:32}}/>
-            <span className="muted-2" style={{fontSize:11.5}}>days</span>
-            <button className="btn" disabled={busy || Number(retentionDays) === configuredRetention} onClick={saveRetention}>Save</button>
-          </div>
           <button className="btn" onClick={exportCSV}><Ic.download/> Export CSV</button>
         </div>
       </div>
@@ -138,11 +124,11 @@ function PageTraffic({ state, dispatch, busy }) {
             </tbody>
           </table>
         </div>
-        <div className="row" style={{justifyContent:"center", padding:"16px", borderTop:"1px solid var(--line-1)"}}>
+        <div className="traffic-log-footer">
           <button className="btn" disabled={busy || !canLoadMore} onClick={() => dispatch?.({type:"loadMoreTraffic"})}>
             <Ic.plus/> {rawLoaded >= 1000 ? "Loaded 1000" : canLoadMore ? "Load more" : "All loaded"}
           </button>
-          <span className="muted-2 mono" style={{fontSize:11}}>latest 1000 in memory · daily files retained {configuredRetention}d</span>
+          <span className="traffic-log-footer-copy muted-2 mono">latest 1000 in memory · daily files retained {configuredRetention}d</span>
         </div>
       </div>
 

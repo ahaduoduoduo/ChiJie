@@ -77,7 +77,8 @@ function PageSubscriptions({ state, dispatch }) {
                       last {lastUpdated}
                     </span>
                   </span>
-                  <button className="btn sm ghost" onClick={() => dispatch({type:"refreshSub", name: s.name})}><Ic.refresh/> Refresh</button>
+                  <button className="btn sm ghost" disabled={!s.enabled} title={s.enabled ? "Refresh subscription" : "Enable the subscription before refreshing"}
+                    onClick={() => dispatch({type:"refreshSub", name: s.name})}><Ic.refresh/> Refresh</button>
                   <button className="btn sm ghost" onClick={() => setOpenSub(s)}><Ic.edit/> Edit</button>
                   <Toggle on={s.enabled} onChange={() => dispatch({type:"togglePool", name:s.name})}/>
                 </div>

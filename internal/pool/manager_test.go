@@ -111,6 +111,49 @@ func TestParseDurationWithDays(t *testing.T) {
 	}
 }
 
+func TestDisabledSubscriptionSkipsInitialAndScheduledFetch(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write([]byte("ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNz@proxy.example.com:1080#US%20Node"))
+	}))
+	defer server.Close()
+
+	disabled := false
+	manager := NewManager()
+	loadedPool, err := manager.buildPool("disabled-sub", &PoolConfig{
+		Source:           "subscription",
+		URL:              server.URL,
+		AllowPrivateHost: true,
+		Enabled:          &disabled,
+		UpdateInterval:   "5ms",
+	})
+	if err != nil {
+		t.Fatalf("build disabled subscription pool: %v", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("initial subscription requests = %d, want 0", got)
+	}
+	if loadedPool.Error != "" || !loadedPool.LastRefreshAt.IsZero() || len(loadedPool.Entries) != 0 {
+		t.Fatalf("disabled subscription should remain idle: %#v", loadedPool)
+	}
+
+	manager.pools[loadedPool.Name] = loadedPool
+	if err := manager.RefreshSubscription(loadedPool.Name); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("manual refresh error = %v, want disabled error", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("manual subscription requests = %d, want 0", got)
+	}
+
+	manager.StartSubscriptionUpdater()
+	defer manager.StopSubscriptionUpdater()
+	time.Sleep(25 * time.Millisecond)
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("scheduled subscription requests = %d, want 0", got)
+	}
+}
+
 func TestLoadFromFileKeepsPreviousSubscriptionEntriesOnFetchError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nodes.yaml")

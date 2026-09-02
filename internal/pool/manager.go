@@ -212,6 +212,10 @@ func (m *Manager) buildPool(name string, cfg *PoolConfig) (*Pool, error) {
 		Name:   name,
 		Config: cfg,
 	}
+	if cfg.Source == "subscription" && !poolEnabled(cfg) {
+		log.Printf("pool %s: disabled; subscription fetch skipped", name)
+		return pool, nil
+	}
 
 	switch cfg.Source {
 	case "direct":
@@ -963,6 +967,9 @@ func (m *Manager) RefreshSubscription(poolName string) error {
 	if pool.Config.Source != "subscription" {
 		return fmt.Errorf("pool %s is not a subscription pool", poolName)
 	}
+	if !poolEnabled(pool.Config) {
+		return fmt.Errorf("pool %s is disabled", poolName)
+	}
 
 	parser := NewSubscriptionParserWithOptions(SubscriptionParserOptions{
 		AllowPrivateHost: pool.Config.AllowPrivateHost,
@@ -1089,7 +1096,7 @@ func (m *Manager) StartSubscriptionUpdater() {
 	defer m.mu.RUnlock()
 
 	for name, pool := range m.pools {
-		if pool.Config.Source != "subscription" || pool.Config.UpdateInterval == "" {
+		if pool.Config.Source != "subscription" || !poolEnabled(pool.Config) || pool.Config.UpdateInterval == "" {
 			continue
 		}
 

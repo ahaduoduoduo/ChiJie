@@ -298,7 +298,7 @@ Proxy API 调用 token 由后台生成，使用同一个 `jwt_secret` 签名，�
 | POST | /api/traffic/success-folding-rules | 保存 200 成功请求的 Host + Path 折叠规则 |
 | GET / PUT | /api/traffic/settings | 查看或更新 Traffic 日志持久化与保留天数 |
 
-Traffic 原始 trace 按本地日期写入配置目录下的 `.runtime/traffic/traffic-YYYY-MM-DD.jsonl`，默认保留 7 天，可通过 Admin Traffic 页面或 `traffic.persistence.retention_days` 设置为 1–3650 天。文件按天自然轮换，启动时加载最近 1000 条到内存；Docker 默认挂载整个 `/config`，因此容器重启或重建不会清空这些记录。
+Traffic 原始 trace 按本地日期写入配置目录下的 `.runtime/traffic/traffic-YYYY-MM-DD.jsonl`，默认保留 7 天，可通过 Admin System 页面的 Logging 设置或 `traffic.persistence.retention_days` 设置为 1–3650 天。文件按天自然轮换，启动时加载最近 1000 条到内存；Docker 默认挂载整个 `/config`，因此容器重启或重建不会清空这些记录。
 
 Traffic 指标使用有效请求口径：普通成功请求逐条计入；失败请求按 `kind + url/target + egress_group` 合并计入，避免同一个目标故障被调用方重复重试后放大错误率；命中 `success_folding` 的 200 请求保留在日志中并折叠为一行，但不计入有效请求、成功率、延迟和分钟序列。原始请求数仍通过 `raw_requests` / `raw_failures` 返回给 Admin 页面展示。
 

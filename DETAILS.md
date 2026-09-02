@@ -67,7 +67,7 @@ chijie/
 │   │   ├── page-templates.jsx   # Templates：模板池新增、编辑、启停、删除、优先级、覆盖范围和按地区测试
 │   │   ├── page-tls.jsx         # TLS Profiles：指纹新增、删除、测试
 │   │   ├── page-traffic.jsx     # Traffic：请求日志、流量序列、详情抽屉、CSV 导出
-│   │   └── page-system.jsx      # System：运行统计、配置重载、日志级别保存、配置导出、Proxy token 生成
+│   │   └── page-system.jsx      # System：运行统计、配置重载、日志级别与请求日志保留天数、配置导出、Proxy token 生成
 │   ├── scripts/
 │   │   └── build.mjs            # 无依赖静态构建：复制 index.html、src 和站点图标到 web/dist
 │   ├── uploads/                 # 原型参考图和截图素材
@@ -174,6 +174,7 @@ WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读�
 - 成功拉取写入 `.runtime/subscriptions.json`；进程重启后的首次拉取失败时按 URL 哈希恢复缓存节点。
 - 订阅拉取只允许 `http` / `https` 公网目标，单次响应 body 上限 4 MB。
 - `update_interval` 支持分钟、小时、天；留空表示只手动刷新。
+- `enabled: false` 的订阅池在启动、配置重载、手动刷新和定时更新阶段均不发起订阅请求；重新启用后再执行实时拉取。
 - `try_offline` 允许某地区只有一个离线订阅节点时继续尝试该节点。
 - 后台健康检查记录 `Alive`、`Latency` 和连续失败次数，默认参数来自 `gateway.yaml` 的 `health_check`，每个池仍可用 `health_check.interval`、`timeout`、`url`、`max_fail` 覆盖。
 
