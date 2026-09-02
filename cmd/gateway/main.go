@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -95,6 +96,7 @@ func main() {
 
 	// 加载节点池
 	poolMgr := pool.NewManager()
+	poolMgr.SetSubscriptionCachePath(filepath.Join(*configDir, ".runtime", "subscriptions.json"))
 	if err := poolMgr.LoadFromFile(*configDir + "/nodes.yaml"); err != nil {
 		log.Fatalf("load nodes: %v", err)
 	}
@@ -126,6 +128,9 @@ func main() {
 
 	trafficStore := traffic.NewStore(1000)
 	trafficStore.UpdateConfig(gatewayConfig.Traffic)
+	if err := trafficStore.EnablePersistence(filepath.Join(*configDir, ".runtime", "traffic")); err != nil {
+		log.Printf("traffic persistence disabled: %v", err)
+	}
 
 	// 创建代理服务器，Admin 设置页会复用同一个运行时配置入口。
 	srv := server.NewServer(&server.Config{
@@ -212,6 +217,7 @@ func main() {
 	}
 	healthChecker.Stop()
 	poolMgr.StopSubscriptionUpdater()
+	trafficStore.Close()
 	log.Printf("shutdown complete")
 }
 

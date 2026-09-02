@@ -100,6 +100,8 @@ type Manager struct {
 	rrMu      sync.Mutex
 	rrByGroup map[string]int
 
+	subscriptionCache *subscriptionCache
+
 	// 订阅自动更新协程的生命周期管理
 	updaterMu     sync.Mutex
 	updaterCancel context.CancelFunc
@@ -142,6 +144,12 @@ func NewManager() *Manager {
 		pools:     make(map[string]*Pool),
 		rrByGroup: make(map[string]int),
 	}
+}
+
+// SetSubscriptionCachePath 配置订阅成功结果缓存。缓存只保存 URL 哈希和解析后的节点，
+// 用于进程重启后首次拉取失败时恢复上一次可用节点。
+func (m *Manager) SetSubscriptionCachePath(path string) {
+	m.subscriptionCache = newSubscriptionCache(path)
 }
 
 // ParseDurationWithDays 兼容 Go duration，并额外支持 d 表示天。
@@ -239,24 +247,30 @@ func (m *Manager) buildPool(name string, cfg *PoolConfig) (*Pool, error) {
 		nodes, err := parser.Fetch(cfg.URL)
 		if err != nil {
 			message := fmt.Sprintf("fetch subscription: %v", err)
+			cachedNodes, cachedAt, cacheErr := m.loadCachedSubscription(cfg.URL)
+			if cacheErr == nil {
+				entries, _, prepareErr := prepareSubscriptionEntries(cachedNodes, cfg)
+				if prepareErr == nil && len(entries) > 0 {
+					pool.restoreSubscriptionEntriesAfterFailure(entries, message)
+					log.Printf("pool %s: restored %d cached subscription nodes from %s after refresh error: %s", name, len(entries), cachedAt.Format(time.RFC3339), message)
+					return pool, nil
+				}
+				if prepareErr != nil {
+					message += fmt.Sprintf("; cached subscription rejected: %v", prepareErr)
+				}
+			}
 			pool.recordSubscriptionRefreshFailure(message)
 			log.Printf("pool %s: %s", name, message)
 			return pool, nil
 		}
+		m.cacheSubscription(cfg.URL, nodes, name)
 
-		// 按地区过滤
-		if cfg.Filter != nil && len(cfg.Filter.Region) > 0 {
-			nodes = filterByRegion(nodes, cfg.Filter.Region)
-		}
-		var filterErr error
-		nodes, filterErr = applyRejectRegexes(nodes, cfg.RejectRegex)
-		if filterErr != nil {
-			pool.recordSubscriptionRefreshFailure(filterErr.Error())
-			log.Printf("pool %s: %s", name, filterErr)
+		entries, warning, prepareErr := prepareSubscriptionEntries(nodes, cfg)
+		if prepareErr != nil {
+			pool.recordSubscriptionRefreshFailure(prepareErr.Error())
+			log.Printf("pool %s: %s", name, prepareErr)
 			return pool, nil
 		}
-
-		entries, warning := buildSubscriptionEntries(nodes, cfg)
 		pool.recordSubscriptionRefreshSuccess(entries, warning)
 		log.Printf("pool %s: loaded %d nodes from subscription", name, len(pool.Entries))
 
@@ -958,21 +972,45 @@ func (m *Manager) RefreshSubscription(poolName string) error {
 		pool.recordSubscriptionRefreshFailure(fmt.Sprintf("fetch subscription: %v", err))
 		return fmt.Errorf("fetch subscription: %w", err)
 	}
+	m.cacheSubscription(pool.Config.URL, nodes, poolName)
 
-	if pool.Config.Filter != nil && len(pool.Config.Filter.Region) > 0 {
-		nodes = filterByRegion(nodes, pool.Config.Filter.Region)
-	}
-	nodes, err = applyRejectRegexes(nodes, pool.Config.RejectRegex)
+	entries, warning, err := prepareSubscriptionEntries(nodes, pool.Config)
 	if err != nil {
 		pool.recordSubscriptionRefreshFailure(err.Error())
 		return err
 	}
-
-	entries, warning := buildSubscriptionEntries(nodes, pool.Config)
 	pool.recordSubscriptionRefreshSuccess(entries, warning)
 
 	log.Printf("pool %s: refreshed %d nodes", poolName, len(entries))
 	return nil
+}
+
+func prepareSubscriptionEntries(nodes []dialer.Node, cfg *PoolConfig) ([]*NodeEntry, string, error) {
+	if cfg.Filter != nil && len(cfg.Filter.Region) > 0 {
+		nodes = filterByRegion(nodes, cfg.Filter.Region)
+	}
+	filtered, err := applyRejectRegexes(nodes, cfg.RejectRegex)
+	if err != nil {
+		return nil, "", err
+	}
+	entries, warning := buildSubscriptionEntries(filtered, cfg)
+	return entries, warning, nil
+}
+
+func (m *Manager) loadCachedSubscription(rawURL string) ([]dialer.Node, time.Time, error) {
+	if m.subscriptionCache == nil {
+		return nil, time.Time{}, fmt.Errorf("subscription cache is disabled")
+	}
+	return m.subscriptionCache.load(rawURL)
+}
+
+func (m *Manager) cacheSubscription(rawURL string, nodes []dialer.Node, poolName string) {
+	if m.subscriptionCache == nil {
+		return
+	}
+	if err := m.subscriptionCache.save(rawURL, nodes); err != nil {
+		log.Printf("pool %s: save subscription cache failed: %v", poolName, err)
+	}
 }
 
 func buildSubscriptionEntries(nodes []dialer.Node, cfg *PoolConfig) ([]*NodeEntry, string) {

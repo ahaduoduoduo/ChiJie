@@ -144,7 +144,7 @@ Docker Hub 自动发布详见 [docs/dockerhub-release.md](docs/dockerhub-release
 
 订阅导入支持 Clash YAML、Base64 URI 列表、未 Base64 包装的纯 URI 列表。URI 列表支持 `ss`、`vmess`、`vless`、`trojan`、`hysteria2` / `hy2`、`anytls` 和 `tuic`。Shadowsocks URI 支持 `ss://userinfo@host:port?plugin=...` 和 SIP002 常见的 `ss://userinfo@host:port/?plugin=...` 写法；`simple-obfs` 插件名会规范化为 sing-box 可识别的 `obfs-local`。订阅拉取使用 `clash-verge/v2.0.0` User-Agent，以兼容会按客户端 UA 返回不同节点集合的订阅服务。单个订阅池可填写多个订阅地址，使用换行、英文逗号或 `|` 分隔；部分订阅地址失败时，已成功解析的节点仍会进入该池。订阅地址必须使用 `http` / `https`；默认只允许公网目标，池级 `allow_private_host: true` 可允许私网、回环和保留地址。响应体超过 4 MB 时会拒绝解析。
 
-订阅池的 `update_interval` 支持 `30m`、`12h`、`3d`，留空表示只手动刷新。自动刷新或配置重载时，如果最近一次拉取失败，运行时保留上一次成功拉取的节点并记录池级错误。运行时同时记录最近一次拉取尝试的时间和结果；Admin Subscriptions 页面以灰色时间表示成功、红色时间表示失败，详细语义见 [docs/subscription-routing.md](docs/subscription-routing.md)。
+订阅池的 `update_interval` 支持 `30m`、`12h`、`3d`，留空表示只手动刷新。每次成功拉取都会把解析后的节点原子写入配置目录下的 `.runtime/subscriptions.json`；自动刷新、配置重载或容器重启后的首次拉取失败时，系统保留或恢复上一次成功节点，并继续展示本次失败状态。Admin Subscriptions 页面以灰色时间表示成功、红色时间表示失败，详细语义见 [docs/subscription-routing.md](docs/subscription-routing.md)。
 
 ## 请求协议
 
@@ -295,13 +295,20 @@ Proxy API 调用 token 由后台生成，使用同一个 `jwt_secret` 签名，�
 |------|------|------|
 | GET | /api/traffic?limit=100 | 查看请求记录、合并展示记录、分钟级流量序列和聚合指标；内存最多保留最近 1000 条 |
 | POST | /api/traffic/grouping-rules | 保存失败 URL 规范化规则，并立即用于 Traffic 合并展示 |
+| POST | /api/traffic/success-folding-rules | 保存 200 成功请求的 Host + Path 折叠规则 |
+| GET / PUT | /api/traffic/settings | 查看或更新 Traffic 日志持久化与保留天数 |
 
-Traffic 指标使用有效请求口径：成功请求逐条计入；失败请求按 `kind + url/target + egress_group` 合并计入，避免同一个目标故障被调用方重复重试后放大错误率。延迟指标只统计最终成功的请求；原始请求数仍通过 `raw_requests` / `raw_failures` 返回给 Admin 页面展示。
+Traffic 原始 trace 按本地日期写入配置目录下的 `.runtime/traffic/traffic-YYYY-MM-DD.jsonl`，默认保留 7 天，可通过 Admin Traffic 页面或 `traffic.persistence.retention_days` 设置为 1–3650 天。文件按天自然轮换，启动时加载最近 1000 条到内存；Docker 默认挂载整个 `/config`，因此容器重启或重建不会清空这些记录。
+
+Traffic 指标使用有效请求口径：普通成功请求逐条计入；失败请求按 `kind + url/target + egress_group` 合并计入，避免同一个目标故障被调用方重复重试后放大错误率；命中 `success_folding` 的 200 请求保留在日志中并折叠为一行，但不计入有效请求、成功率、延迟和分钟序列。原始请求数仍通过 `raw_requests` / `raw_failures` 返回给 Admin 页面展示。
 
 失败请求的 URL 可按规则先做规范化再参与合并。Admin 请求详情里的 `Ignore URL params` 可从真实错误 URL 生成规则：Host 和 Path 每一段可点击切换为 `*`，Query 参数可勾选加入 `drop_keys`。规则会保存到 `gateway.yaml`，完整说明见 [docs/traffic-url-grouping.md](docs/traffic-url-grouping.md)：
 
 ```yaml
 traffic:
+  persistence:
+    enabled: true
+    retention_days: 7
   failure_grouping:
     enabled: true
     url_normalization:
@@ -316,6 +323,13 @@ traffic:
               - vendtime
               - vhash
             sort: true
+  success_folding:
+    enabled: true
+    rules:
+      - name: "frequent-search"
+        match:
+          host_pattern: "api.example.com"
+          path_pattern: "/v1/search"
 ```
 
 #### 指纹管理

@@ -161,6 +161,8 @@ func NewServer(listen string, poolManager *pool.Manager, fpManager *fingerprint.
 	mux.HandleFunc("/api/stats", s.authMiddleware(s.handleStats))
 	mux.HandleFunc("/api/traffic", s.authMiddleware(s.handleTraffic))
 	mux.HandleFunc("/api/traffic/grouping-rules", s.authMiddleware(s.handleTrafficGroupingRules))
+	mux.HandleFunc("/api/traffic/success-folding-rules", s.authMiddleware(s.handleTrafficSuccessFoldingRules))
+	mux.HandleFunc("/api/traffic/settings", s.authMiddleware(s.handleTrafficSettings))
 	mux.HandleFunc("/api/system/logging", s.authMiddleware(s.handleLogging))
 	mux.HandleFunc("/api/system/health-check", s.authMiddleware(s.handleHealthCheckSettings))
 	mux.HandleFunc("/api/system/proxy", s.authMiddleware(s.handleProxySettings))
@@ -1224,71 +1226,6 @@ func (s *Server) loadProxySettings() (proxyserver.ProxySettings, error) {
 	return proxyserver.ParseProxySettings(cfg.Proxy)
 }
 
-func (s *Server) loadTrafficConfig() (traffic.Config, error) {
-	path := filepath.Join(s.configDir, "gateway.yaml")
-	var cfg struct {
-		Traffic traffic.Config `yaml:"traffic"`
-	}
-	if err := loadYAML(path, &cfg); err != nil {
-		return traffic.DefaultConfig(), err
-	}
-	return traffic.NormalizeConfig(cfg.Traffic), nil
-}
-
-func (s *Server) handleTrafficGroupingRules(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "POST":
-		var req traffic.URLNormalizationRule
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request body"})
-			return
-		}
-		cfg, rule, err := s.persistTrafficGroupingRule(req)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-		if s.traffic != nil {
-			s.traffic.UpdateConfig(cfg)
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"rule":   rule,
-			"config": cfg,
-		})
-	default:
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-	}
-}
-
-func (s *Server) persistTrafficGroupingRule(rule traffic.URLNormalizationRule) (traffic.Config, traffic.URLNormalizationRule, error) {
-	s.fileMu.Lock()
-	defer s.fileMu.Unlock()
-
-	path := filepath.Join(s.configDir, "gateway.yaml")
-	var raw map[string]any
-	if err := loadYAML(path, &raw); err != nil {
-		return traffic.Config{}, traffic.URLNormalizationRule{}, err
-	}
-	var typed struct {
-		Traffic traffic.Config `yaml:"traffic"`
-	}
-	if err := loadYAML(path, &typed); err != nil {
-		return traffic.Config{}, traffic.URLNormalizationRule{}, err
-	}
-	cfg, storedRule, err := traffic.MergeURLNormalizationRule(typed.Traffic, rule)
-	if err != nil {
-		return traffic.Config{}, traffic.URLNormalizationRule{}, err
-	}
-	if raw == nil {
-		raw = map[string]any{}
-	}
-	raw["traffic"] = cfg
-	if err := atomicWriteYAML(path, raw); err != nil {
-		return traffic.Config{}, traffic.URLNormalizationRule{}, err
-	}
-	return cfg, storedRule, nil
-}
-
 func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -1307,23 +1244,6 @@ func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {
 		"nodes_yaml":        readText("nodes.yaml"),
 		"fingerprints_yaml": readText("fingerprints.yaml"),
 	})
-}
-
-// handleTraffic GET 请求日志和流量统计
-func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-
-	limit := 100
-	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
-		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
-			limit = parsed
-		}
-	}
-
-	writeJSON(w, http.StatusOK, s.traffic.Snapshot(limit))
 }
 
 // writeJSON 写入 JSON 响应

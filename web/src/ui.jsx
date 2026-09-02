@@ -350,15 +350,81 @@ function TrafficRuleBuilder({ request, onSave }) {
   );
 }
 
-function RequestDetailContent({ request, onSaveGroupingRule }) {
+function SuccessFoldRuleBuilder({ request, onSave }) {
+  const parsed = React.useMemo(() => parseURL(request?.url), [request?.url]);
+  const [hostParts, setHostParts] = useState([]);
+  const [pathParts, setPathParts] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!parsed) return;
+    const parts = splitURLParts(parsed);
+    setHostParts(parts.host);
+    setPathParts(parts.path);
+  }, [parsed]);
+
+  if (!parsed) return null;
+  const hostPattern = patternFromParts(hostParts, ".", "");
+  const pathPattern = patternFromParts(pathParts, "/", "/");
+  const toggleHost = (index) => setHostParts(parts => parts.map((part, i) => i === index ? { ...part, any: !part.any } : part));
+  const togglePath = (index) => setPathParts(parts => parts.map((part, i) => i === index ? { ...part, any: !part.any } : part));
+  const save = async () => {
+    if (!hostPattern || !pathPattern || saving) return;
+    setSaving(true);
+    try {
+      return await onSave?.({
+        name: ruleNameFromPatterns(hostPattern, pathPattern),
+        match: { host_pattern: hostPattern, path_pattern: pathPattern },
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="url-rule-builder">
+      <div className="url-rule-head">
+        <div>
+          <div className="url-rule-title">Successful path folding</div>
+          <div className="url-rule-copy">Matching 200 responses stay in the log as one folded row and are excluded from metrics.</div>
+        </div>
+      </div>
+      <URLPartButtons title="Host" parts={hostParts} onToggle={toggleHost}/>
+      <URLPartButtons title="Path" parts={pathParts} onToggle={togglePath}/>
+      <div className="url-rule-preview">
+        <div className="url-rule-label">Rule</div>
+        <div className="mono">host: {hostPattern}</div>
+        <div className="mono">path: {pathPattern}</div>
+      </div>
+      <div className="row" style={{justifyContent:"flex-end", marginTop:12}}>
+        <button className="btn primary" disabled={!hostPattern || !pathPattern || saving} onClick={save}>
+          <Ic.check/> {saving ? "Saving..." : "Save folding rule"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RequestDetailContent({ request, onSaveGroupingRule, onSaveSuccessFoldingRule }) {
+  const [ruleOpen, setRuleOpen] = useState(false);
+  const [successFoldOpen, setSuccessFoldOpen] = useState(false);
+  useEffect(() => {
+    setRuleOpen(false);
+    setSuccessFoldOpen(false);
+  }, [request?.id]);
   if (!request) return null;
   const replayRegion = request.region || (window.PG?.baseRegionCode ? window.PG.baseRegionCode(request.group) : String(request.group || "").replace(/-RES/g, "").replace(/-PREM/g, ""));
-  const [ruleOpen, setRuleOpen] = useState(false);
   const parsed = parseURL(request.url);
   const canEditRule = !!onSaveGroupingRule && isRequestError(request) && queryEntries(parsed).length > 0;
+  const canFoldSuccess = !!onSaveSuccessFoldingRule && request.status === 200 && !request.error && !!parsed;
   const saveGroupingRule = async (rule) => {
     const result = await onSaveGroupingRule(rule);
     if (result !== null) setRuleOpen(false);
+    return result;
+  };
+  const saveSuccessFoldingRule = async (rule) => {
+    const result = await onSaveSuccessFoldingRule(rule);
+    if (result !== null) setSuccessFoldOpen(false);
     return result;
   };
   return (
@@ -375,6 +441,11 @@ function RequestDetailContent({ request, onSaveGroupingRule }) {
             <Ic.filter/> Ignore URL params
           </button>
         )}
+        {canFoldSuccess && (
+          <button className="btn sm" onClick={() => setSuccessFoldOpen(open => !open)} style={{marginLeft:"auto"}}>
+            <Ic.filter/> Fold successful path
+          </button>
+        )}
       </div>
       <div className="kv" style={{rowGap:14}}>
         <div className="k">Time</div><div className="v mono">{fmtUTC8(request.ts)}</div>
@@ -389,6 +460,7 @@ function RequestDetailContent({ request, onSaveGroupingRule }) {
         {request.error && <><div className="k">Error</div><div className="v mono" style={{fontSize:11.5}}>{request.error}</div></>}
       </div>
       {ruleOpen && <TrafficRuleBuilder request={request} onSave={saveGroupingRule}/>}
+      {successFoldOpen && <SuccessFoldRuleBuilder request={request} onSave={saveSuccessFoldingRule}/>}
       <div className="sep-h"/>
       <div className="muted-2" style={{fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10, fontWeight:500}}>Replay payload</div>
       <pre className="mono request-replay" style={{margin:0, padding:14, background:"var(--bg-2)", border:"1px solid var(--line-2)", borderRadius:6, fontSize:11.5, overflow:"auto", lineHeight:1.55, color:"var(--fg-1)"}}>{`POST /proxy

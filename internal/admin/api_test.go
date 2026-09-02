@@ -353,3 +353,88 @@ log:
 		t.Fatalf("runtime traffic config did not merge failures, got %d", got)
 	}
 }
+
+func TestTrafficSuccessFoldingRulePersistsAndUpdatesRuntime(t *testing.T) {
+	dir := t.TempDir()
+	gatewayPath := filepath.Join(dir, "gateway.yaml")
+	if err := os.WriteFile(gatewayPath, []byte(`
+server:
+  listen: ":8080"
+admin:
+  jwt_secret: "1234567890123456"
+log:
+  level: "info"
+  file: ""
+`), 0600); err != nil {
+		t.Fatalf("write gateway config: %v", err)
+	}
+
+	store := traffic.NewStore(1000)
+	server := NewServer("127.0.0.1:0", pool.NewManager(), fingerprint.NewManager(), dir, "", "1234567890123456", "24h", nil, store)
+	req := httptest.NewRequest(http.MethodPost, "/api/traffic/success-folding-rules", bytes.NewReader([]byte(`{
+		"name":"frequent-search",
+		"match":{"host_pattern":"api.example.com","path_pattern":"/v1/search"}
+	}`)))
+	rec := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST success folding rule status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var stored struct {
+		Traffic traffic.Config `yaml:"traffic"`
+	}
+	if err := loadYAML(gatewayPath, &stored); err != nil {
+		t.Fatalf("load persisted gateway config: %v", err)
+	}
+	if len(stored.Traffic.SuccessFolding.Rules) != 1 {
+		t.Fatalf("stored success folding rules = %d want 1", len(stored.Traffic.SuccessFolding.Rules))
+	}
+
+	store.Record(traffic.Trace{Kind: "proxy", URL: "https://api.example.com/v1/search?q=one", EgressGroup: "US", Status: 200})
+	store.Record(traffic.Trace{Kind: "proxy", URL: "https://api.example.com/v1/search?q=two", EgressGroup: "US", Status: 200})
+	snapshot := store.Snapshot(10)
+	if snapshot.Metrics.Requests != 0 || snapshot.Metrics.IgnoredSuccess != 2 {
+		t.Fatalf("runtime success folding not applied: %#v", snapshot.Metrics)
+	}
+	if len(snapshot.DisplayTraces) != 1 || snapshot.DisplayTraces[0].GroupCount != 2 {
+		t.Fatalf("unexpected folded rows: %#v", snapshot.DisplayTraces)
+	}
+}
+
+func TestTrafficPersistenceSettingsPersistAndUpdateRuntime(t *testing.T) {
+	dir := t.TempDir()
+	gatewayPath := filepath.Join(dir, "gateway.yaml")
+	if err := os.WriteFile(gatewayPath, []byte(`
+admin:
+  jwt_secret: "1234567890123456"
+traffic:
+  persistence:
+    enabled: true
+    retention_days: 7
+`), 0600); err != nil {
+		t.Fatalf("write gateway config: %v", err)
+	}
+
+	store := traffic.NewStore(1000)
+	server := NewServer("127.0.0.1:0", pool.NewManager(), fingerprint.NewManager(), dir, "", "1234567890123456", "24h", nil, store)
+	req := httptest.NewRequest(http.MethodPut, "/api/traffic/settings", bytes.NewReader([]byte(`{"enabled":true,"retention_days":30}`)))
+	rec := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT traffic settings status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if got := store.Config().Persistence.RetentionDays; got != 30 {
+		t.Fatalf("runtime retention_days = %d want 30", got)
+	}
+
+	var stored struct {
+		Traffic traffic.Config `yaml:"traffic"`
+	}
+	if err := loadYAML(gatewayPath, &stored); err != nil {
+		t.Fatalf("load persisted gateway config: %v", err)
+	}
+	if stored.Traffic.Persistence.RetentionDays != 30 {
+		t.Fatalf("persisted retention_days = %d want 30", stored.Traffic.Persistence.RetentionDays)
+	}
+}

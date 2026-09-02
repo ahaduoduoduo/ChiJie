@@ -267,6 +267,7 @@
       group_key: trace.group_key || "",
       group_target: trace.group_target || "",
       group_count: Number(trace.group_count || 1),
+      excluded_from_metrics: !!trace.excluded_from_metrics,
       children: (trace.children || []).map(normalizeTrace),
     };
   }
@@ -281,6 +282,7 @@
       rawLoaded: rawTraces.length,
       rawTotal: Number(metrics.raw_requests || rawTraces.length),
       series: normalizeSeries(snapshot?.series || [], metrics),
+      config: snapshot?.config || {},
     };
   }
 
@@ -408,6 +410,14 @@
     addTrafficGroupingRule: (rule) => request("/api/traffic/grouping-rules", {
       method: "POST",
       body: rule,
+    }),
+    addTrafficSuccessFoldingRule: (rule) => request("/api/traffic/success-folding-rules", {
+      method: "POST",
+      body: rule,
+    }),
+    updateTrafficSettings: (settings) => request("/api/traffic/settings", {
+      method: "PUT",
+      body: settings,
     }),
     addFingerprint: ({ name, config, configText }) => request("/api/fingerprints", {
       method: "POST",

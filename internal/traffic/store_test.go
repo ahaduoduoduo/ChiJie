@@ -210,3 +210,64 @@ func TestStoreCoalescesFailuresWithDroppedQueryKeys(t *testing.T) {
 		t.Fatalf("group target should preserve stable query keys: %s", merged.GroupTarget)
 	}
 }
+
+func TestStoreFoldsConfigured200ResponsesAndExcludesThemFromMetrics(t *testing.T) {
+	store := NewStore(10)
+	cfg, _, err := MergeSuccessFoldingRule(DefaultConfig(), SuccessFoldingRule{
+		Name: "frequent-search",
+		Match: URLNormalizationMatch{
+			HostPattern: "api.example.com",
+			PathPattern: "/v1/search",
+		},
+	})
+	if err != nil {
+		t.Fatalf("merge success folding rule: %v", err)
+	}
+	store.UpdateConfig(cfg)
+
+	for _, rawURL := range []string{
+		"https://api.example.com/v1/search?q=one",
+		"https://api.example.com/v1/search?q=two",
+	} {
+		store.Record(Trace{
+			Kind:        "proxy",
+			Method:      "GET",
+			URL:         rawURL,
+			EgressGroup: "US",
+			Status:      200,
+			LatencyMS:   20,
+		})
+	}
+	store.Record(Trace{
+		Kind:        "proxy",
+		Method:      "GET",
+		URL:         "https://api.example.com/v1/search?q=failed",
+		EgressGroup: "US",
+		Status:      502,
+		Error:       "bad gateway",
+	})
+
+	snapshot := store.Snapshot(10)
+	if snapshot.Metrics.RawRequests != 3 || snapshot.Metrics.IgnoredSuccess != 2 {
+		t.Fatalf("unexpected raw/ignored metrics: %#v", snapshot.Metrics)
+	}
+	if snapshot.Metrics.Requests != 1 || snapshot.Metrics.Success != 0 || snapshot.Metrics.Failures != 1 {
+		t.Fatalf("unexpected effective metrics: %#v", snapshot.Metrics)
+	}
+	if len(snapshot.DisplayTraces) != 2 {
+		t.Fatalf("display traces = %d want 2", len(snapshot.DisplayTraces))
+	}
+	var folded *DisplayTrace
+	for i := range snapshot.DisplayTraces {
+		if snapshot.DisplayTraces[i].ExcludedFromMetric {
+			folded = &snapshot.DisplayTraces[i]
+			break
+		}
+	}
+	if folded == nil || folded.GroupCount != 2 || len(folded.Children) != 2 {
+		t.Fatalf("unexpected folded success row: %#v", folded)
+	}
+	if len(snapshot.Series) != 1 || snapshot.Series[0].Requests != 1 || snapshot.Series[0].Failures != 1 {
+		t.Fatalf("unexpected effective series: %#v", snapshot.Series)
+	}
+}

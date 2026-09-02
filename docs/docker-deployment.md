@@ -105,7 +105,7 @@ docker compose -f docker-compose.prod.yml up -d
 docker compose up -d --build
 ```
 
-配置文件挂载在宿主机 `./configs`，容器重建不会覆盖。
+配置文件和运行状态挂载在宿主机 `./configs`，容器重建不会覆盖。运行状态位于 `./configs/.runtime`：`subscriptions.json` 保存最近一次成功订阅结果，`traffic/` 保存按天轮换的请求日志。
 
 ## 端口与配置目录
 
@@ -129,7 +129,7 @@ ${CHIJIE_ADMIN_HOST}:${CHIJIE_ADMIN_PORT} -> 容器 9090
 ${CHIJIE_CONFIG_DIR} -> 容器 /config
 ```
 
-容器内端口保持固定，升级或迁移时只改 `.env`。
+容器内端口保持固定，升级或迁移时只改 `.env`。不要把 `/config` 改成只读挂载，否则订阅缓存、Traffic 日志和 Admin 配置保存均无法写入。
 
 ## 架构
 

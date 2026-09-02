@@ -27,6 +27,7 @@ chijie/
 │   │   ├── status.go            # 节点池运行状态：订阅最近拉取结果、Admin 状态 DTO、节点及地区组状态快照
 │   │   ├── node_metadata.go     # 节点元数据：标签、家宽/高端标识、别名和 server:port 稳定键
 │   │   ├── subscription.go      # 订阅解析：多格式与多地址解析、池级本地地址许可、重定向/拨号校验、URL 与响应大小限制
+│   │   ├── subscription_cache.go # 订阅成功结果缓存：URL 哈希索引、0600 原子写入、重启失败恢复
 │   │   └── health.go            # 健康检查：按池配置后台探测节点连通性、延迟和模板即时测试
 │   ├── dialer/
 │   │   ├── dialer.go            # 统一 Dialer 接口定义、Node 结构、工厂方法
@@ -39,10 +40,15 @@ chijie/
 │   │   ├── http2_transport.go   # HTTP/2 指纹 transport：uTLS 握手、HTTP/2 首帧、响应 body 上限
 │   │   └── transport.go         # Transport 包装：替换 DialTLSContext 注入 uTLS 指纹，提供独立 TLS 拨号入口
 │   ├── traffic/
-│   │   ├── store.go             # 请求记录、分钟级指标、活跃隧道计数
+│   │   ├── store.go             # 请求记录、有效指标、折叠展示、活跃隧道计数
+│   │   ├── grouping.go          # 失败请求合并与 URL Query 规范化规则
+│   │   ├── success_folding.go   # Host + Path 的 200 折叠与统计排除规则
+│   │   ├── persistence.go       # 每日 JSONL 持久化、启动恢复和按保留天数清理
+│   │   ├── persistence_test.go  # Traffic 重启恢复、文件权限和过期日期清理测试
 │   │   └── store_test.go        # 流量统计测试
 │   └── admin/
 │       ├── api.go               # 管理 API：JWT 鉴权、节点/指纹 CRUD、配置重载、统计、日志级别、配置导出、登录限速、SSRF 防护
+│       ├── traffic_api.go       # Traffic API：日志查询、保留设置、失败规范化规则和 200 折叠规则持久化
 │       ├── login_limiter.go     # 按 IP 维度的登录失败速率限制
 │       ├── yaml_io.go           # 通用 YAML 加载/原子写入（0600 权限）
 │       └── dist/                # 前端构建产物（embed 到二进制）
@@ -74,6 +80,7 @@ chijie/
 │   ├── index.html               # 静态 HTML、样式和脚本加载顺序
 │   └── dist/                    # npm run build 产物
 ├── configs/
+│   ├── .runtime/                # 运行生成数据：订阅成功缓存和按日 Traffic JSONL（不提交 Git）
 │   ├── gateway.yaml             # 主配置：端口、TLS、认证密钥、Admin 鉴权、日志
 │   ├── gateway.docker.yaml.example # Docker 场景主配置模板
 │   ├── nodes.yaml               # 节点池配置
@@ -162,6 +169,7 @@ WebSocket 隧道 `/tunnel` 使用同一套 `egress` 参数。连接升级后读�
 - 自动地区识别，也支持 `node_regions` 手动修正。
 - 支持 `node_aliases`、`node_tags`、`node_server_aliases`、`node_server_tags`、`node_server_regions`、`region_group_names` 和 `reject_regex`。
 - 拉取失败记录为池级错误，不阻断其他节点池加载；运行时已有旧节点时继续保留上一次成功节点。
+- 成功拉取写入 `.runtime/subscriptions.json`；进程重启后的首次拉取失败时按 URL 哈希恢复缓存节点。
 - 订阅拉取只允许 `http` / `https` 公网目标，单次响应 body 上限 4 MB。
 - `update_interval` 支持分钟、小时、天；留空表示只手动刷新。
 - `try_offline` 允许某地区只有一个离线订阅节点时继续尝试该节点。
@@ -210,9 +218,11 @@ JA3/JA4/Akamai 都按 raw 输入保存，测试结果只展示远端返回的真
 - 地区、地区组、策略、家宽标识、高端标识。
 - 出口池、出口节点、来源类型、是否模板。
 - TLS 指纹、状态码、耗时、字节数和错误文本。
-- 原始 trace、合并展示 trace、分钟级有效请求数、成功率、成功请求平均延迟 / P95、活跃隧道数和 URL 规范化规则。
+- 原始 trace、合并展示 trace、分钟级有效请求数、成功率、成功请求平均延迟 / P95、活跃隧道数、持久化设置和折叠规则。
 
-失败请求按 `kind + url/target + egress_group` 合并为有效错误，不把 header、payload、出口节点或策略纳入合并键。成功请求不合并；延迟指标只使用成功请求，避免目标站点长时间无响应导致的重复失败污染延迟视图。`traffic.failure_grouping.url_normalization.rules` 支持在生成合并键前删除易变 query 参数，Admin 请求详情可通过 Host/Path 片段按钮和 Query 复选框生成 `host_pattern`、`path_pattern` 和 `drop_keys`；完整说明见 `docs/traffic-url-grouping.md`。
+原始 trace 由 `persistence.go` 按本地日期写入 `.runtime/traffic/traffic-YYYY-MM-DD.jsonl`，默认保留 7 天，启动时恢复最近 1000 条。失败请求按 `kind + url/target + egress_group` 合并为有效错误，不把 header、payload、出口节点或策略纳入合并键。`traffic.failure_grouping.url_normalization.rules` 支持在生成合并键前删除易变 query 参数。
+
+`traffic.success_folding.rules` 匹配 Host + Path；命中的 200 响应按 `kind + host/path + egress_group` 折叠展示，保留原始 trace，但从有效请求、成功率、延迟、字节数和分钟序列排除。Admin 请求详情可生成失败 Query 规范化规则或成功 Path 折叠规则；完整说明见 `docs/traffic-url-grouping.md`。
 
 ### admin（管理 API）
 

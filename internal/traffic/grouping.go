@@ -9,7 +9,9 @@ import (
 
 // Config controls how traffic traces are reduced for admin metrics and display.
 type Config struct {
+	Persistence     PersistenceConfig     `yaml:"persistence,omitempty" json:"persistence,omitempty"`
 	FailureGrouping FailureGroupingConfig `yaml:"failure_grouping,omitempty" json:"failure_grouping,omitempty"`
+	SuccessFolding  SuccessFoldingConfig  `yaml:"success_folding,omitempty" json:"success_folding,omitempty"`
 }
 
 type FailureGroupingConfig struct {
@@ -39,19 +41,37 @@ type QueryNormalizationConfig struct {
 }
 
 func DefaultConfig() Config {
+	persistenceEnabled := true
 	groupingEnabled := true
 	normalizationEnabled := false
+	successFoldingEnabled := false
 	return Config{
+		Persistence: PersistenceConfig{
+			Enabled:       &persistenceEnabled,
+			RetentionDays: DefaultRetentionDays,
+		},
 		FailureGrouping: FailureGroupingConfig{
 			Enabled: &groupingEnabled,
 			URLNormalization: URLNormalizationConfig{
 				Enabled: &normalizationEnabled,
 			},
 		},
+		SuccessFolding: SuccessFoldingConfig{
+			Enabled: &successFoldingEnabled,
+		},
 	}
 }
 
 func NormalizeConfig(cfg Config) Config {
+	persistenceEnabled := true
+	if cfg.Persistence.Enabled != nil {
+		persistenceEnabled = *cfg.Persistence.Enabled
+	}
+	retentionDays := cfg.Persistence.RetentionDays
+	if retentionDays < 1 || retentionDays > MaxRetentionDays {
+		retentionDays = DefaultRetentionDays
+	}
+
 	groupingEnabled := true
 	if cfg.FailureGrouping.Enabled != nil {
 		groupingEnabled = *cfg.FailureGrouping.Enabled
@@ -72,6 +92,10 @@ func NormalizeConfig(cfg Config) Config {
 	}
 
 	return Config{
+		Persistence: PersistenceConfig{
+			Enabled:       &persistenceEnabled,
+			RetentionDays: retentionDays,
+		},
 		FailureGrouping: FailureGroupingConfig{
 			Enabled: &groupingEnabled,
 			URLNormalization: URLNormalizationConfig{
@@ -79,6 +103,7 @@ func NormalizeConfig(cfg Config) Config {
 				Rules:   rules,
 			},
 		},
+		SuccessFolding: normalizeSuccessFoldingConfig(cfg.SuccessFolding),
 	}
 }
 

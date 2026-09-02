@@ -42,4 +42,5 @@ Thumbs.db
 configs/gateway.yaml
 configs/nodes.yaml
 configs/fingerprints.yaml
+configs/.runtime/
 .cursor-input-socket

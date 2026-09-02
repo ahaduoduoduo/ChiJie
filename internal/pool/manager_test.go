@@ -159,6 +159,61 @@ node_pools:
 	}
 }
 
+func TestLoadFromFileRestoresPersistedSubscriptionCacheAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	nodesPath := filepath.Join(dir, "nodes.yaml")
+	cachePath := filepath.Join(dir, ".runtime", "subscriptions.json")
+	subscriptionURL := "http://127.0.0.1:9/sub?token=cache-secret"
+	data := []byte(`
+node_pools:
+  sub:
+    source: subscription
+    url: "http://127.0.0.1:9/sub?token=cache-secret"
+`)
+	if err := os.WriteFile(nodesPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cache := newSubscriptionCache(cachePath)
+	if err := cache.save(subscriptionURL, []dialer.Node{
+		{Name: "cached-node", Type: "direct", Region: "US"},
+	}); err != nil {
+		t.Fatalf("save subscription cache: %v", err)
+	}
+
+	manager := NewManager()
+	manager.SetSubscriptionCachePath(cachePath)
+	if err := manager.LoadFromFile(nodesPath); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	current := manager.GetPool("sub")
+	if current == nil || len(current.Entries) != 1 {
+		t.Fatalf("expected one cached entry, got %#v", current)
+	}
+	if current.Entries[0].Node.Name != "cached-node" {
+		t.Fatalf("unexpected cached node: %#v", current.Entries[0].Node)
+	}
+	if !current.LastRefreshFailed || current.Error == "" {
+		t.Fatalf("expected current pull failure to remain visible: %#v", current)
+	}
+
+	cacheData, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("read cache: %v", err)
+	}
+	if strings.Contains(string(cacheData), subscriptionURL) || strings.Contains(string(cacheData), "cache-secret") {
+		t.Fatalf("subscription cache must not store source URLs: %s", cacheData)
+	}
+	info, err := os.Stat(cachePath)
+	if err != nil {
+		t.Fatalf("stat cache: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("cache permissions = %o want 600", got)
+	}
+}
+
 func TestLoadFromFileDoesNotPreserveStaticEntriesWhenPoolBecomesSubscription(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nodes.yaml")

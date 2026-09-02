@@ -26,11 +26,17 @@ proxy:
   template_fallback_after_attempts: true
 
 traffic:
+  persistence:
+    enabled: true
+    retention_days: 7
   failure_grouping:
     enabled: true
     url_normalization:
       enabled: true
       rules: []
+  success_folding:
+    enabled: true
+    rules: []
 
 log:
   level: "info"

@@ -396,6 +396,20 @@ function App() {
           toast("Traffic rule saved");
           return result;
         }
+        case "addTrafficSuccessFoldingRule": {
+          const result = await api.addTrafficSuccessFoldingRule(action.rule);
+          const traffic = await api.getTraffic(trafficLimit);
+          baseDispatch({ type: "setTraffic", traffic });
+          toast("Successful path folding saved");
+          return result;
+        }
+        case "updateTrafficSettings": {
+          const result = await api.updateTrafficSettings(action.settings);
+          const traffic = await api.getTraffic(trafficLimit);
+          baseDispatch({ type: "setTraffic", traffic });
+          toast("Traffic retention saved");
+          return result;
+        }
         case "addFingerprint": {
           const result = await api.addFingerprint({ name: action.name, config: action.config, configText: action.configText });
           await refreshData(true);

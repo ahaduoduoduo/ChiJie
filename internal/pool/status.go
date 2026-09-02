@@ -23,6 +23,15 @@ func (p *Pool) recordSubscriptionRefreshSuccess(entries []*NodeEntry, warning st
 	p.LastRefreshFailed = false
 }
 
+func (p *Pool) restoreSubscriptionEntriesAfterFailure(entries []*NodeEntry, message string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Entries = entries
+	p.Error = message
+	p.LastRefreshAt = time.Now().UTC()
+	p.LastRefreshFailed = true
+}
+
 // PoolStatus 节点池状态（供 Admin API 使用）
 type PoolStatus struct {
 	Name              string              `json:"name"`

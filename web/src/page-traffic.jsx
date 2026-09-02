@@ -7,6 +7,10 @@ function PageTraffic({ state, dispatch, busy }) {
   const [search, setSearch] = React.useState("");
   const [open, setOpen] = React.useState(null);
   const [expanded, setExpanded] = React.useState({});
+  const configuredRetention = Number(traffic.config?.persistence?.retention_days || 7);
+  const [retentionDays, setRetentionDays] = React.useState(configuredRetention);
+
+  React.useEffect(() => setRetentionDays(configuredRetention), [configuredRetention]);
 
   const metrics = traffic.metrics || {};
   const effectiveTotal = Number(metrics.requests ?? traffic.requests.length);
@@ -14,6 +18,7 @@ function PageTraffic({ state, dispatch, busy }) {
   const rawTotal = Number(traffic.rawTotal || rawLoaded);
   const errorTotal = Number(metrics.failures ?? traffic.requests.filter(isTrafficError).length);
   const rawFailures = Number(metrics.raw_failures || errorTotal);
+  const ignoredSuccess = Number(metrics.ignored_success || 0);
   const avgLatency = Number(metrics.avg_latency_ms || 0) || averageSuccessfulLatency(traffic.requests);
 
   const rowMatchesSearch = (r) => {
@@ -37,6 +42,11 @@ function PageTraffic({ state, dispatch, busy }) {
   const tunnels = traffic.requests.filter(r => r.type === "tunnel").length;
   const toggleExpanded = (id) => setExpanded(s => ({ ...s, [id]: !s[id] }));
   const saveGroupingRule = (rule) => dispatch?.({ type: "addTrafficGroupingRule", rule });
+  const saveSuccessFoldingRule = (rule) => dispatch?.({ type: "addTrafficSuccessFoldingRule", rule });
+  const saveRetention = () => dispatch?.({
+    type: "updateTrafficSettings",
+    settings: { enabled: true, retention_days: Math.max(1, Math.min(3650, Number(retentionDays) || 7)) },
+  });
   const exportCSV = () => {
     const header = ["time","type","method","url","region","pool","node","status","duration_ms","bytes","count","error"];
     const lines = rows.map(r => [
@@ -60,6 +70,13 @@ function PageTraffic({ state, dispatch, busy }) {
           <p>Effective request log for HTTP and tunnel egress. Repeated failures with the same URL and region are merged into one row.</p>
         </div>
         <div className="page-h-actions">
+          <div className="row" style={{gap:6}}>
+            <span className="muted-2" style={{fontSize:11.5}}>Keep</span>
+            <input className="input mono" type="number" min="1" max="3650" value={retentionDays}
+              onChange={e => setRetentionDays(e.target.value)} style={{width:68, height:32}}/>
+            <span className="muted-2" style={{fontSize:11.5}}>days</span>
+            <button className="btn" disabled={busy || Number(retentionDays) === configuredRetention} onClick={saveRetention}>Save</button>
+          </div>
           <button className="btn" onClick={exportCSV}><Ic.download/> Export CSV</button>
         </div>
       </div>
@@ -68,7 +85,7 @@ function PageTraffic({ state, dispatch, busy }) {
         <div className="stat">
           <div className="stat-label">Effective requests</div>
           <div className="stat-value">{effectiveTotal}</div>
-          <div className="stat-delta">{rawTotal !== effectiveTotal ? `${rawTotal} raw traces` : "no merged retries"}</div>
+          <div className="stat-delta">{ignoredSuccess ? `${ignoredSuccess} folded 200s excluded · ${rawTotal} raw` : (rawTotal !== effectiveTotal ? `${rawTotal} raw traces` : "no merged retries")}</div>
           <div style={{marginTop:14}}><BarChart series={traffic.series} width={240} height={36}/></div>
         </div>
         <div className="stat">
@@ -125,12 +142,12 @@ function PageTraffic({ state, dispatch, busy }) {
           <button className="btn" disabled={busy || !canLoadMore} onClick={() => dispatch?.({type:"loadMoreTraffic"})}>
             <Ic.plus/> {rawLoaded >= 1000 ? "Loaded 1000" : canLoadMore ? "Load more" : "All loaded"}
           </button>
-          <span className="muted-2 mono" style={{fontSize:11}}>memory window max 1000</span>
+          <span className="muted-2 mono" style={{fontSize:11}}>latest 1000 in memory · daily files retained {configuredRetention}d</span>
         </div>
       </div>
 
       <Drawer open={!!open} onClose={() => setOpen(null)} title="Request detail">
-        <RequestDetailContent request={open} onSaveGroupingRule={saveGroupingRule}/>
+        <RequestDetailContent request={open} onSaveGroupingRule={saveGroupingRule} onSaveSuccessFoldingRule={saveSuccessFoldingRule}/>
       </Drawer>
     </div>
   );
@@ -164,7 +181,7 @@ function TrafficRow({ row, openDetail, expanded, toggleExpanded, child }) {
       <td className="mono" style={{color:"var(--fg-1)"}}>{row.method}</td>
       <td className="mono truncate" style={{maxWidth:240, fontSize:11.5}}>
         {row.url}
-        {canExpand && <span className="muted-2" style={{marginLeft:8, fontSize:10}}>merged failures</span>}
+        {canExpand && <span className="muted-2" style={{marginLeft:8, fontSize:10}}>{row.excluded_from_metrics ? "folded 200s" : "merged failures"}</span>}
       </td>
       <td><RegionPill code={row.group} residential={row.residential}/></td>
       <td className="mono" style={{fontSize:11.5}}>

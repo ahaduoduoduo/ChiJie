@@ -42,6 +42,10 @@ proxy:
   template_fallback_after_attempts: true
 
 traffic:
+  # Traffic 请求日志按天写入 configs/.runtime/traffic；只加载最近 1000 条到内存。
+  persistence:
+    enabled: true
+    retention_days: 7
   failure_grouping:
     enabled: true
     url_normalization:
@@ -57,6 +61,10 @@ traffic:
               - vendtime
               - vhash
             sort: true
+  # 命中的 200 响应会按 host + path + 出口地区折叠展示，并从有效指标中排除。
+  success_folding:
+    enabled: true
+    rules: []
 
 log:
   level: "info"

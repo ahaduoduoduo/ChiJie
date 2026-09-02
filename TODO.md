@@ -486,3 +486,13 @@
 - [x] Admin Subscriptions 页面显示相对时间，成功为灰色，失败为红色
 - [x] 部分节点被跳过的警告与拉取失败使用独立判断
 - [x] 补充后端测试、README、DETAILS 和订阅状态文档
+
+## P53 — 运行数据持久化与成功请求折叠 ✅
+日期：2026-09-02
+
+- [x] 订阅成功结果使用 URL 哈希写入 `.runtime/subscriptions.json`，容器重启后首次拉取失败时恢复缓存节点
+- [x] Traffic 原始 trace 按日写入 JSONL，默认保留 7 天，保留天数支持 Admin 和 YAML 配置
+- [x] 启动时恢复最近 1000 条 Traffic trace，过期日期文件自动清理
+- [x] 新增 Host + Path 的 200 折叠规则，命中请求保留日志但排除出有效统计
+- [x] Traffic 请求详情支持创建成功折叠规则，列表展示 `xN` 折叠结果
+- [x] 补充订阅缓存、Traffic 持久化、Docker 状态目录、配置示例和自动化测试

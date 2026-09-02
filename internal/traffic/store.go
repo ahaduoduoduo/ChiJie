@@ -2,6 +2,8 @@ package traffic
 
 import (
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -38,6 +40,7 @@ type Metrics struct {
 	Failures       int64   `json:"failures"`
 	RawRequests    int64   `json:"raw_requests"`
 	RawFailures    int64   `json:"raw_failures"`
+	IgnoredSuccess int64   `json:"ignored_success"`
 	RequestBytes   int64   `json:"request_bytes"`
 	ResponseBytes  int64   `json:"response_bytes"`
 	ActiveTunnels  int64   `json:"active_tunnels"`
@@ -58,10 +61,11 @@ type Bucket struct {
 
 type DisplayTrace struct {
 	Trace
-	GroupKey    string  `json:"group_key,omitempty"`
-	GroupTarget string  `json:"group_target,omitempty"`
-	GroupCount  int     `json:"group_count,omitempty"`
-	Children    []Trace `json:"children,omitempty"`
+	GroupKey           string  `json:"group_key,omitempty"`
+	GroupTarget        string  `json:"group_target,omitempty"`
+	GroupCount         int     `json:"group_count,omitempty"`
+	ExcludedFromMetric bool    `json:"excluded_from_metrics,omitempty"`
+	Children           []Trace `json:"children,omitempty"`
 }
 
 type Snapshot struct {
@@ -69,6 +73,7 @@ type Snapshot struct {
 	Traces        []Trace        `json:"traces"`
 	DisplayTraces []DisplayTrace `json:"display_traces"`
 	Series        []Bucket       `json:"series"`
+	Config        Config         `json:"config"`
 }
 
 type Store struct {
@@ -79,6 +84,7 @@ type Store struct {
 	startedAt     time.Time
 	activeTunnels int64
 	config        Config
+	persistence   *tracePersistence
 }
 
 func NewStore(capacity int) *Store {
@@ -95,7 +101,17 @@ func NewStore(capacity int) *Store {
 func (s *Store) UpdateConfig(cfg Config) {
 	s.mu.Lock()
 	s.config = NormalizeConfig(cfg)
+	s.pruneExpiredLocked(time.Now())
+	persistence := s.persistence
+	retentionDays := s.config.Persistence.RetentionDays
 	s.mu.Unlock()
+	if persistence != nil {
+		if err := persistence.updateRetention(retentionDays); err != nil {
+			// NormalizeConfig guarantees a valid positive default. Keep the current
+			// writer active if an out-of-range runtime update reaches this layer.
+			return
+		}
+	}
 }
 
 func (s *Store) Config() Config {
@@ -106,7 +122,7 @@ func (s *Store) Config() Config {
 
 func (s *Store) Record(trace Trace) Trace {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.pruneExpiredLocked(time.Now())
 
 	s.nextID++
 	trace.ID = "trace-" + formatID(s.nextID)
@@ -118,8 +134,67 @@ func (s *Store) Record(trace Trace) Trace {
 		copy(s.traces, s.traces[len(s.traces)-s.capacity:])
 		s.traces = s.traces[:s.capacity]
 	}
+	persistence := s.persistence
+	persist := persistence != nil && persistenceEnabled(s.config)
+	s.mu.Unlock()
+
+	if persist {
+		persistence.enqueue(trace)
+	}
 
 	return trace
+}
+
+// EnablePersistence loads recent JSONL traces and starts the daily writer.
+func (s *Store) EnablePersistence(directory string) error {
+	s.mu.RLock()
+	retentionDays := s.config.Persistence.RetentionDays
+	enabled := persistenceEnabled(s.config)
+	s.mu.RUnlock()
+
+	persistence, loaded, err := newTracePersistence(directory, retentionDays, s.capacity)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		loaded = nil
+	}
+
+	s.mu.Lock()
+	if s.persistence != nil {
+		s.mu.Unlock()
+		persistence.close()
+		return nil
+	}
+	s.persistence = persistence
+	if len(loaded) > 0 {
+		s.traces = append(loaded, s.traces...)
+		sort.SliceStable(s.traces, func(i, j int) bool {
+			return s.traces[i].Timestamp.Before(s.traces[j].Timestamp)
+		})
+		if len(s.traces) > s.capacity {
+			s.traces = append([]Trace(nil), s.traces[len(s.traces)-s.capacity:]...)
+		}
+		for _, trace := range s.traces {
+			if id := parseTraceID(trace.ID); id > s.nextID {
+				s.nextID = id
+			}
+		}
+		if !s.traces[0].Timestamp.IsZero() {
+			s.startedAt = s.traces[0].Timestamp
+		}
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) Close() {
+	s.mu.RLock()
+	persistence := s.persistence
+	s.mu.RUnlock()
+	if persistence != nil {
+		persistence.close()
+	}
 }
 
 func (s *Store) TunnelOpened() {
@@ -137,8 +212,9 @@ func (s *Store) TunnelClosed() {
 }
 
 func (s *Store) Snapshot(limit int) Snapshot {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneExpiredLocked(time.Now())
 
 	if limit <= 0 || limit > len(s.traces) {
 		limit = len(s.traces)
@@ -154,13 +230,30 @@ func (s *Store) Snapshot(limit int) Snapshot {
 		Traces:        traces,
 		DisplayTraces: displayTraces(traces, s.config),
 		Series:        buildSeries(s.traces, time.Now(), s.config),
+		Config:        NormalizeConfig(s.config),
 	}
 }
 
 func (s *Store) Metrics() Metrics {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneExpiredLocked(time.Now())
 	return s.metricsLocked()
+}
+
+func (s *Store) pruneExpiredLocked(now time.Time) {
+	days := s.config.Persistence.RetentionDays
+	if days < 1 {
+		days = DefaultRetentionDays
+	}
+	cutoff := startOfLocalDay(now).AddDate(0, 0, -(days - 1))
+	kept := s.traces[:0]
+	for _, trace := range s.traces {
+		if !trace.Timestamp.Before(cutoff) {
+			kept = append(kept, trace)
+		}
+	}
+	s.traces = kept
 }
 
 func (s *Store) metricsLocked() Metrics {
@@ -171,6 +264,10 @@ func (s *Store) metricsLocked() Metrics {
 	for i := len(s.traces) - 1; i >= 0; i-- {
 		trace := s.traces[i]
 		metrics.RawRequests++
+		if _, _, folded := successFoldGroup(trace, s.config); folded {
+			metrics.IgnoredSuccess++
+			continue
+		}
 		if isFailure(trace) {
 			metrics.RawFailures++
 			key := failureGroupKey(trace, s.config)
@@ -222,6 +319,23 @@ func displayTraces(traces []Trace, cfg Config) []DisplayTrace {
 	rows := make([]DisplayTrace, 0, len(traces))
 	indexByKey := make(map[string]int)
 	for _, trace := range traces {
+		if key, target, folded := successFoldGroup(trace, cfg); folded {
+			if index, ok := indexByKey[key]; ok {
+				rows[index].GroupCount++
+				rows[index].Children = append(rows[index].Children, trace)
+				continue
+			}
+			indexByKey[key] = len(rows)
+			rows = append(rows, DisplayTrace{
+				Trace:              trace,
+				GroupKey:           key,
+				GroupTarget:        target,
+				GroupCount:         1,
+				ExcludedFromMetric: true,
+				Children:           []Trace{trace},
+			})
+			continue
+		}
 		if !isFailure(trace) {
 			rows = append(rows, DisplayTrace{Trace: trace, GroupCount: 1})
 			continue
@@ -261,6 +375,9 @@ func buildSeries(traces []Trace, now time.Time, cfg Config) []Bucket {
 
 	for i := len(traces) - 1; i >= 0; i-- {
 		trace := traces[i]
+		if _, _, folded := successFoldGroup(trace, cfg); folded {
+			continue
+		}
 		minute := trace.Timestamp.Truncate(time.Minute)
 		if minute.Before(cutoff) {
 			continue
@@ -339,4 +456,13 @@ func formatID(value int64) string {
 		value /= 36
 	}
 	return string(buf[i:])
+}
+
+func parseTraceID(value string) int64 {
+	raw := strings.TrimPrefix(value, "trace-")
+	parsed, err := strconv.ParseInt(raw, 36, 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
 }
