@@ -138,7 +138,7 @@ proxies:
 	if nodes[1].Extra["client_fingerprint"] != "chrome" || nodes[1].Extra["certificate_fingerprint"] == "" {
 		t.Fatalf("fingerprint fields not separated: %#v", nodes[1].Extra)
 	}
-	if nodes[2].Extra["network"] != "xhttp" || nodes[2].Extra["xhttp_mode"] != "stream-up" || nodes[2].Extra["xhttp_download_server"] != "download.example.com" || nodes[2].Extra["xhttp_download_settings"] != "true" {
+	if nodes[2].Extra["network"] != "xhttp" || nodes[2].Extra["xhttp_mode"] != "stream-up" || nodes[2].Extra["xhttp_download_server"] != "download.example.com" {
 		t.Fatalf("xhttp clash extras not parsed: %#v", nodes[2].Extra)
 	}
 	if nodes[3].Type != "hysteria2" || nodes[3].Extra["skip_verify"] != "true" || nodes[3].Extra["obfs_password"] != "obfs-pass" {
@@ -265,7 +265,7 @@ func TestParseVLESSURISupportsXHTTPExtra(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse vless xhttp uri: %v", err)
 	}
-	if node.Extra["network"] != "xhttp" || node.Extra["xhttp_mode"] != "stream-up" || node.Extra["xhttp_download_server"] != "download.example.com" || node.Extra["xhttp_download_settings"] != "true" {
+	if node.Extra["network"] != "xhttp" || node.Extra["xhttp_mode"] != "stream-up" || node.Extra["xhttp_download_server"] != "download.example.com" {
 		t.Fatalf("xhttp uri extras not parsed: %#v", node.Extra)
 	}
 }

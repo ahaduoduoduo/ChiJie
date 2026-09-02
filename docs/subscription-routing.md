@@ -92,7 +92,7 @@ Chijie 使用专用拨号器处理 `vless + xhttp/splithttp`，支持以下模�
 - `stream-one`，要求 TLS 或 Reality 提供 HTTP/2
 - `auto`；默认选择 `packet-up`，Reality 自动选择 `stream-one`
 
-模式为空时按 Xray 的 `auto` 规则处理。其他代理协议搭配 XHTTP、XHTTP HTTP/3 和上下行分离 `downloadSettings` 暂不支持。订阅节点包含 `downloadSettings` 时会明确跳过，不会忽略该配置后使用主地址代替下载地址。订阅状态保留具体失败原因，例如 `unsupported xhttp downloadSettings` 或 `unsupported xhttp mode`。
+模式为空时按 Xray 的 `auto` 规则处理。其他代理协议搭配 XHTTP 和 XHTTP HTTP/3 暂不支持。订阅解析会保留 `downloadSettings` 字段，但当前拨号器不切换到独立下载地址，下载仍使用主节点地址；这与旧版行为一致，并兼容服务端允许主地址同时处理上下行的节点。订阅状态保留具体失败原因，例如 `unsupported xhttp mode` 或 `unsupported xhttp HTTP/3`。
 
 最近尝试时间和成功/失败状态保存在进程内存中，不写入 `nodes.yaml`。服务启动会立即拉取 subscription 池；若启动拉取失败但存在上一次成功缓存，新进程恢复缓存节点，同时以本次失败结果建立状态。
 

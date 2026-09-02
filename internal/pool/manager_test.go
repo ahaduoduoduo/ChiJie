@@ -1267,7 +1267,7 @@ func TestBuildSubscriptionEntriesLoadsVLESSXHTTP(t *testing.T) {
 	}
 }
 
-func TestBuildSubscriptionEntriesReportsUnsupportedXHTTPDetail(t *testing.T) {
+func TestBuildSubscriptionEntriesLoadsXHTTPWithDownloadSettings(t *testing.T) {
 	nodes := []dialer.Node{
 		{
 			Name:   "vless-xhttp-download-settings",
@@ -1275,21 +1275,23 @@ func TestBuildSubscriptionEntriesReportsUnsupportedXHTTPDetail(t *testing.T) {
 			Server: "vless.example.com",
 			Port:   443,
 			Extra: map[string]string{
-				"uuid":                    "11111111-1111-1111-1111-111111111111",
-				"security":                "tls",
-				"network":                 "xhttp",
-				"xhttp_mode":              "auto",
-				"xhttp_download_settings": "true",
+				"uuid":                      "11111111-1111-1111-1111-111111111111",
+				"security":                  "tls",
+				"network":                   "xhttp",
+				"xhttp_mode":                "stream-up",
+				"xhttp_download_server":     "download.example.com",
+				"xhttp_download_port":       "443",
+				"xhttp_download_servername": "download.example.com",
 			},
 		},
 	}
 
 	entries, warning := buildSubscriptionEntries(nodes, &PoolConfig{Source: "subscription"})
-	if len(entries) != 0 {
-		t.Fatalf("expected unsupported node to be skipped, got %d entries", len(entries))
-	}
-	if !strings.Contains(warning, "unsupported xhttp downloadSettings") {
+	if warning != "" {
 		t.Fatalf("unexpected warning: %q", warning)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected node to load, got %d entries", len(entries))
 	}
 }
 

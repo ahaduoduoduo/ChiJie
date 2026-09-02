@@ -57,15 +57,18 @@ func TestBuildXHTTPOptionsRejectsUnsupportedMode(t *testing.T) {
 	}
 }
 
-func TestBuildXHTTPOptionsRejectsDownloadSettings(t *testing.T) {
+func TestBuildXHTTPOptionsKeepsCompatibilityWithDownloadSettings(t *testing.T) {
 	tests := []map[string]string{
-		{"xhttp_download_settings": "true"},
-		{"xhttp_download_server": "download.example.com"},
+		{"xhttp_download_server": "download.example.com", "xhttp_mode": "stream-up"},
+		{"xhttp_download_path": "/xhttp", "xhttp_download_port": "443", "xhttp_mode": "stream-up"},
 	}
 	for _, extra := range tests {
-		_, err := buildXHTTPOptions(&Node{Extra: extra})
-		if err == nil || !strings.Contains(err.Error(), "unsupported xhttp downloadSettings") {
-			t.Fatalf("unexpected error for %#v: %v", extra, err)
+		options, err := buildXHTTPOptions(&Node{Extra: extra})
+		if err != nil {
+			t.Fatalf("build options for %#v: %v", extra, err)
+		}
+		if options.Mode != xhttp.ModeStreamUp {
+			t.Fatalf("mode = %q, want %q", options.Mode, xhttp.ModeStreamUp)
 		}
 	}
 }

@@ -503,5 +503,5 @@
 - [x] 升级 `sing-xhttp`，接入 `stream-one` 双向流式传输
 - [x] 支持 Xray `auto` 模式，Reality 节点自动使用 `stream-one`
 - [x] 保留 VLESS XHTTP 初始化的具体失败原因，不再统一显示为整个 XHTTP 传输不支持
-- [x] 检测尚未生效的 `downloadSettings` 并明确跳过，避免错误加载节点
+- [x] 保留 `downloadSettings` 解析结果但继续使用主地址下载，避免旧版可用节点因该字段被跳过
 - [x] 补充 TLS、Reality、订阅池模式和底层 XHTTP 端到端测试
