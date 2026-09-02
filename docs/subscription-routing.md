@@ -83,6 +83,17 @@ node_pools:
 
 Admin Subscriptions 页面将 `last_updated` 转换为相对时间；成功使用默认灰色，失败使用红色，悬停显示本地绝对时间。部分订阅地址失败但仍取得有效节点，以及部分不支持节点被跳过，均按成功处理；只有本次结果无法应用时才标记失败。
 
+## VLESS XHTTP 支持范围
+
+Chijie 使用专用拨号器处理 `vless + xhttp/splithttp`，支持以下模式：
+
+- `packet-up`
+- `stream-up`，要求 TLS 或 Reality 提供 HTTP/2
+- `stream-one`，要求 TLS 或 Reality 提供 HTTP/2
+- `auto`；默认选择 `packet-up`，Reality 自动选择 `stream-one`
+
+模式为空时按 Xray 的 `auto` 规则处理。其他代理协议搭配 XHTTP、XHTTP HTTP/3 和上下行分离 `downloadSettings` 暂不支持。订阅节点包含 `downloadSettings` 时会明确跳过，不会忽略该配置后使用主地址代替下载地址。订阅状态保留具体失败原因，例如 `unsupported xhttp downloadSettings` 或 `unsupported xhttp mode`。
+
 最近尝试时间和成功/失败状态保存在进程内存中，不写入 `nodes.yaml`。服务启动会立即拉取 subscription 池；若启动拉取失败但存在上一次成功缓存，新进程恢复缓存节点，同时以本次失败结果建立状态。
 
 ## 自动地区识别

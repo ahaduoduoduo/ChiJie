@@ -487,6 +487,7 @@ func applyClashXHTTPExtras(node *dialer.Node, opts *struct {
 		}
 	}
 	if opts.DownloadSettings != nil {
+		node.Extra["xhttp_download_settings"] = "true"
 		setExtra(node.Extra, "xhttp_download_path", opts.DownloadSettings.Path)
 		setExtra(node.Extra, "xhttp_download_server", opts.DownloadSettings.Server)
 		setExtra(node.Extra, "xhttp_download_port", scalarToString(opts.DownloadSettings.Port))
@@ -844,6 +845,7 @@ func applyVLESSXHTTPURIExtra(extra map[string]string, raw string) {
 	if err := json.Unmarshal([]byte(raw), &config); err != nil || config.DownloadSettings == nil {
 		return
 	}
+	extra["xhttp_download_settings"] = "true"
 	setExtra(extra, "xhttp_download_path", config.DownloadSettings.Path)
 	setExtra(extra, "xhttp_download_server", config.DownloadSettings.Server)
 	setExtra(extra, "xhttp_download_port", scalarToString(config.DownloadSettings.Port))

@@ -32,6 +32,22 @@ func TestNewSingBoxDialerSupportsUTLSAndReality(t *testing.T) {
 				"short_id":   "abcd",
 			},
 		},
+		{
+			Name:   "vless-xhttp-reality-auto",
+			Type:   "vless",
+			Server: "vless.example.com",
+			Port:   443,
+			Extra: map[string]string{
+				"uuid":       "11111111-1111-1111-1111-111111111111",
+				"security":   "reality",
+				"sni":        "www.example.com",
+				"public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				"short_id":   "abcd",
+				"network":    "xhttp",
+				"xhttp_mode": "auto",
+				"xhttp_path": "/xhttp",
+			},
+		},
 	}
 
 	for _, node := range nodes {

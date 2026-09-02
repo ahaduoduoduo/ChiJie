@@ -34,7 +34,9 @@ chijie/
 │   │   ├── direct.go            # 直连 Dialer
 │   │   ├── socks5.go            # SOCKS5 代理 Dialer
 │   │   ├── http_proxy.go        # HTTP Proxy Dialer（CONNECT 隧道）
-│   │   └── singbox.go           # Shadowsocks / VMess / VLESS / Trojan / Hysteria2 出站适配
+│   │   ├── singbox.go           # Shadowsocks / VMess / VLESS / Trojan / Hysteria2 出站适配
+│   │   ├── vless_xhttp.go       # VLESS XHTTP 专用拨号器：packet-up、stream-up、stream-one、auto
+│   │   └── resolver.go           # 出口节点域名使用的公共 DNS 拨号器
 │   ├── fingerprint/
 │   │   ├── fingerprint.go       # 指纹库管理：YAML 加载、预设/JA3/字符串配置解析、BuildSpec
 │   │   ├── http2_transport.go   # HTTP/2 指纹 transport：uTLS 握手、HTTP/2 首帧、响应 body 上限

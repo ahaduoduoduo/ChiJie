@@ -496,3 +496,12 @@
 - [x] 新增 Host + Path 的 200 折叠规则，命中请求保留日志但排除出有效统计
 - [x] Traffic 请求详情支持创建成功折叠规则，列表展示 `xN` 折叠结果
 - [x] 补充订阅缓存、Traffic 持久化、Docker 状态目录、配置示例和自动化测试
+
+## P54 — VLESS XHTTP stream-one 与 auto ✅
+日期：2026-09-02
+
+- [x] 升级 `sing-xhttp`，接入 `stream-one` 双向流式传输
+- [x] 支持 Xray `auto` 模式，Reality 节点自动使用 `stream-one`
+- [x] 保留 VLESS XHTTP 初始化的具体失败原因，不再统一显示为整个 XHTTP 传输不支持
+- [x] 检测尚未生效的 `downloadSettings` 并明确跳过，避免错误加载节点
+- [x] 补充 TLS、Reality、订阅池模式和底层 XHTTP 端到端测试

@@ -361,7 +361,7 @@ func buildTLSOptions(node *Node, defaultEnabled bool) map[string]any {
 	if alpn := util.FirstNonEmpty(node.Extra["alpn"], node.Extra["alpns"]); alpn != "" {
 		tlsOptions["alpn"] = util.SplitList(alpn)
 	}
-	realityEnabled := security == "reality" || node.Extra["reality"] == "true" || node.Extra["public_key"] != "" || node.Extra["pbk"] != ""
+	realityEnabled := usesRealityTLS(node)
 	fingerprint := normalizeUTLSFingerprint(util.FirstNonEmpty(node.Extra["fingerprint"], node.Extra["client_fingerprint"], node.Extra["client-fingerprint"], node.Extra["fp"]))
 	if realityEnabled && fingerprint == "" {
 		fingerprint = "chrome"
@@ -380,6 +380,14 @@ func buildTLSOptions(node *Node, defaultEnabled bool) map[string]any {
 		}
 	}
 	return tlsOptions
+}
+
+func usesRealityTLS(node *Node) bool {
+	if node == nil || node.Extra == nil {
+		return false
+	}
+	security := strings.ToLower(util.FirstNonEmpty(node.Extra["security"], node.Extra["tls"]))
+	return security == "reality" || node.Extra["reality"] == "true" || node.Extra["public_key"] != "" || node.Extra["pbk"] != ""
 }
 
 func normalizeUTLSFingerprint(value string) string {

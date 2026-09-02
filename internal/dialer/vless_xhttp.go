@@ -109,9 +109,16 @@ func isXHTTPTransport(node *Node) bool {
 }
 
 func buildXHTTPOptions(node *Node) (xhttp.Options, error) {
-	mode := strings.ToLower(strings.TrimSpace(util.FirstNonEmpty(node.Extra["xhttp_mode"], node.Extra["mode"])))
+	if hasXHTTPDownloadSettings(node) {
+		return xhttp.Options{}, fmt.Errorf("unsupported xhttp downloadSettings")
+	}
+	if requestsXHTTP3(node) {
+		return xhttp.Options{}, fmt.Errorf("unsupported xhttp HTTP/3")
+	}
+
+	mode := resolveXHTTPMode(node)
 	switch mode {
-	case "", xhttp.ModePacketUp, xhttp.ModeStreamUp:
+	case xhttp.ModePacketUp, xhttp.ModeStreamUp, xhttp.ModeStreamOne:
 	default:
 		return xhttp.Options{}, fmt.Errorf("unsupported xhttp mode: %s", mode)
 	}
@@ -126,6 +133,45 @@ func buildXHTTPOptions(node *Node) (xhttp.Options, error) {
 		Headers:      toXHTTPHeaders(parseHeaderOptions(util.FirstNonEmpty(node.Extra["xhttp_headers"], node.Extra["headers"]))),
 	}
 	return options, nil
+}
+
+func resolveXHTTPMode(node *Node) string {
+	mode := strings.ToLower(strings.TrimSpace(util.FirstNonEmpty(node.Extra["xhttp_mode"], node.Extra["mode"])))
+	if mode != "" && mode != xhttp.ModeAuto {
+		return mode
+	}
+	if usesRealityTLS(node) {
+		return xhttp.ModeStreamOne
+	}
+	return xhttp.ModePacketUp
+}
+
+func hasXHTTPDownloadSettings(node *Node) bool {
+	if node == nil || node.Extra == nil {
+		return false
+	}
+	if truthy(node.Extra["xhttp_download_settings"]) {
+		return true
+	}
+	for _, key := range []string{
+		"xhttp_download_path",
+		"xhttp_download_server",
+		"xhttp_download_port",
+		"xhttp_download_servername",
+	} {
+		if strings.TrimSpace(node.Extra[key]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func requestsXHTTP3(node *Node) bool {
+	if node == nil || node.Extra == nil {
+		return false
+	}
+	alpns := util.SplitList(util.FirstNonEmpty(node.Extra["alpn"], node.Extra["alpns"]))
+	return len(alpns) > 0 && strings.EqualFold(alpns[0], "h3")
 }
 
 func toXHTTPHeaders(headers map[string]string) badoption.HTTPHeader {

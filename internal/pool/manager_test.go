@@ -1237,29 +1237,59 @@ func TestBuildSubscriptionEntriesReportsUnsupportedTransports(t *testing.T) {
 }
 
 func TestBuildSubscriptionEntriesLoadsVLESSXHTTP(t *testing.T) {
+	for _, mode := range []string{"packet-up", "stream-up", "stream-one", "auto"} {
+		t.Run(mode, func(t *testing.T) {
+			nodes := []dialer.Node{
+				{
+					Name:   "vless-xhttp-" + mode,
+					Type:   "vless",
+					Server: "vless.example.com",
+					Port:   443,
+					Extra: map[string]string{
+						"uuid":       "11111111-1111-1111-1111-111111111111",
+						"security":   "tls",
+						"sni":        "vless.example.com",
+						"network":    "xhttp",
+						"xhttp_mode": mode,
+						"xhttp_path": "/path",
+					},
+				},
+			}
+
+			entries, warning := buildSubscriptionEntries(nodes, &PoolConfig{Source: "subscription"})
+			if warning != "" {
+				t.Fatalf("unexpected warning: %q", warning)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("expected xhttp node to load, got %d entries", len(entries))
+			}
+		})
+	}
+}
+
+func TestBuildSubscriptionEntriesReportsUnsupportedXHTTPDetail(t *testing.T) {
 	nodes := []dialer.Node{
 		{
-			Name:   "vless-xhttp",
+			Name:   "vless-xhttp-download-settings",
 			Type:   "vless",
 			Server: "vless.example.com",
 			Port:   443,
 			Extra: map[string]string{
-				"uuid":       "11111111-1111-1111-1111-111111111111",
-				"security":   "tls",
-				"sni":        "vless.example.com",
-				"network":    "xhttp",
-				"xhttp_mode": "stream-up",
-				"xhttp_path": "/path",
+				"uuid":                    "11111111-1111-1111-1111-111111111111",
+				"security":                "tls",
+				"network":                 "xhttp",
+				"xhttp_mode":              "auto",
+				"xhttp_download_settings": "true",
 			},
 		},
 	}
 
 	entries, warning := buildSubscriptionEntries(nodes, &PoolConfig{Source: "subscription"})
-	if warning != "" {
-		t.Fatalf("unexpected warning: %q", warning)
+	if len(entries) != 0 {
+		t.Fatalf("expected unsupported node to be skipped, got %d entries", len(entries))
 	}
-	if len(entries) != 1 {
-		t.Fatalf("expected xhttp node to load, got %d entries", len(entries))
+	if !strings.Contains(warning, "unsupported xhttp downloadSettings") {
+		t.Fatalf("unexpected warning: %q", warning)
 	}
 }
 

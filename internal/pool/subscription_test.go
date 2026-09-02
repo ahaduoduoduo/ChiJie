@@ -138,7 +138,7 @@ proxies:
 	if nodes[1].Extra["client_fingerprint"] != "chrome" || nodes[1].Extra["certificate_fingerprint"] == "" {
 		t.Fatalf("fingerprint fields not separated: %#v", nodes[1].Extra)
 	}
-	if nodes[2].Extra["network"] != "xhttp" || nodes[2].Extra["xhttp_mode"] != "stream-up" || nodes[2].Extra["xhttp_download_server"] != "download.example.com" {
+	if nodes[2].Extra["network"] != "xhttp" || nodes[2].Extra["xhttp_mode"] != "stream-up" || nodes[2].Extra["xhttp_download_server"] != "download.example.com" || nodes[2].Extra["xhttp_download_settings"] != "true" {
 		t.Fatalf("xhttp clash extras not parsed: %#v", nodes[2].Extra)
 	}
 	if nodes[3].Type != "hysteria2" || nodes[3].Extra["skip_verify"] != "true" || nodes[3].Extra["obfs_password"] != "obfs-pass" {
@@ -265,8 +265,18 @@ func TestParseVLESSURISupportsXHTTPExtra(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse vless xhttp uri: %v", err)
 	}
-	if node.Extra["network"] != "xhttp" || node.Extra["xhttp_mode"] != "stream-up" || node.Extra["xhttp_download_server"] != "download.example.com" {
+	if node.Extra["network"] != "xhttp" || node.Extra["xhttp_mode"] != "stream-up" || node.Extra["xhttp_download_server"] != "download.example.com" || node.Extra["xhttp_download_settings"] != "true" {
 		t.Fatalf("xhttp uri extras not parsed: %#v", node.Extra)
+	}
+}
+
+func TestParseVLESSURISupportsXHTTPStreamOne(t *testing.T) {
+	node, err := parseVLESSURI("vless://11111111-1111-1111-1111-111111111111@xhttp.example.com:443?type=xhttp&security=reality&sni=www.example.com&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=abcd&path=%2Fxhttp&mode=stream-one#xhttp-stream-one")
+	if err != nil {
+		t.Fatalf("parse vless xhttp stream-one uri: %v", err)
+	}
+	if node.Extra["network"] != "xhttp" || node.Extra["xhttp_mode"] != "stream-one" || node.Extra["security"] != "reality" {
+		t.Fatalf("xhttp stream-one uri extras not parsed: %#v", node.Extra)
 	}
 }
 

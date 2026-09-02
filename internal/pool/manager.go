@@ -1045,6 +1045,9 @@ func subscriptionSkipReason(node *dialer.Node, err error) string {
 		network := strings.ToLower(util.FirstNonEmpty(node.Extra["network"], node.Extra["transport"], node.Extra["transport_type"]))
 		switch network {
 		case "xhttp", "splithttp", "split-http":
+			if strings.EqualFold(node.Type, "vless") {
+				return err.Error()
+			}
 			return fmt.Sprintf("unsupported v2ray transport %q", network)
 		}
 	}
